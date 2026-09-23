@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#0e0e18">
+<link rel="manifest" href="manifest.json">
+<title>狼人杀 · 手机版</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;background:#0e0e18;background-image:radial-gradient(ellipse 70% 50% at 50% -10%,#2c2c4a 0%,transparent 65%);color:#e8e8f0;min-height:100vh;display:flex;justify-content:center}
+#app{width:100%;max-width:540px;padding:20px 16px 48px}
+.center-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;min-height:78vh;gap:8px}
+.panel{display:flex;flex-direction:column;gap:12px;padding-top:10px}
+.panel.center{align-items:center;text-align:center}
+.muted{color:#8a8aa0;font-size:14px;line-height:1.7;margin:8px 0}
+.hint{color:#c9a227;font-size:13px;margin:0}
+.bigmsg{font-size:17px;line-height:1.6;margin:6px 0}
+.hl{color:#e06c6c}
+button{font-family:inherit;cursor:pointer;border:none;outline:none}
+button:disabled{opacity:.4;cursor:not-allowed}
+.primary{background:linear-gradient(135deg,#d4af37,#b8860b);color:#1a1408;font-weight:700;font-size:16px;padding:15px 28px;border-radius:14px;width:100%;letter-spacing:1px;box-shadow:0 6px 20px -6px rgba(212,175,55,.6);transition:transform .12s}
+.primary:active:not(:disabled){transform:scale(.97)}
+.primary.big{margin-top:14px;padding:17px;font-size:17px}
+.ghost{background:transparent;color:#9a9ab5;border:1px solid #33334d;padding:13px;border-radius:13px;width:100%;font-size:15px}
+.ghost:active{background:#1e1e30}
+.card{background:#1a1a2b;border:1px solid #26263c;border-radius:16px;padding:16px;margin-bottom:14px}
+.label{font-size:13px;color:#7c7c96;margin-bottom:10px;letter-spacing:1px}
+.ipt{width:100%;background:#13131f;border:1px solid #2e2e48;border-radius:12px;padding:14px 16px;color:#e8e8f0;font-size:17px;font-family:inherit;outline:none;text-align:center;letter-spacing:2px}
+.ipt:focus{border-color:#d4af37}
+.title{font-size:38px;font-weight:800;letter-spacing:6px;text-align:center;margin:10px 0 6px;background:linear-gradient(180deg,#f5e6b8,#b8860b);-webkit-background-clip:text;background-clip:text;color:transparent}
+.subtitle{text-align:center;color:#6e6e88;font-size:13px;letter-spacing:2px;margin-bottom:24px}
+.divider{text-align:center;color:#4a4a66;font-size:13px;margin:14px 0}
+.roomcode{text-align:center;font-size:15px;color:#8a8aa0;letter-spacing:2px}
+.roomcode b{font-size:52px;color:#d4af37;letter-spacing:12px;display:block;margin:6px 0;font-weight:800}
+.plist{display:flex;flex-direction:column;gap:8px}
+.prow{display:flex;align-items:center;gap:12px;background:#1a1a2b;border:1px solid #26263c;border-radius:13px;padding:13px 16px}
+.prow.off{opacity:.42}
+.avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#3a3a5c,#26263c);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#c0c0d8;flex-shrink:0}
+.prow.me .avatar{background:linear-gradient(135deg,#d4af37,#b8860b);color:#1a1408}
+.pname{flex:1;font-size:15px}
+.ptag{font-size:11px;color:#7a7a94;border:1px solid #33334d;padding:2px 8px;border-radius:6px}
+.ptag.host{color:#d4af37;border-color:#5a4a20}
+.phasehead{font-size:19px;font-weight:700;letter-spacing:2px;padding-bottom:4px;border-bottom:1px solid #26263c}
+.statusbar{display:flex;gap:18px;font-size:13.5px;color:#9a9ab5;background:#191928;border-radius:10px;padding:10px 14px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:4px}
+.pcard{background:#23233a;border:1px solid #32324d;border-radius:13px;padding:16px 4px;color:#dcdce8;font-size:15px;font-weight:600;transition:all .13s}
+.pcard:active{transform:scale(.95);background:#30304c;border-color:#4a4a70}
+.rolecard{width:100%;max-width:340px;border-radius:22px;padding:30px 24px;text-align:center;border:1px solid #2e2e48;background:linear-gradient(170deg,#1e1e33,#16162a);margin:12px 0 4px}
+.rolecard.wolf{border-color:rgba(176,58,58,.55);box-shadow:0 0 50px -12px rgba(176,58,58,.55)}
+.rolecard.god{border-color:rgba(58,110,176,.55);box-shadow:0 0 50px -12px rgba(58,110,176,.55)}
+.rolecard.good{border-color:rgba(58,139,92,.55);box-shadow:0 0 50px -12px rgba(58,139,92,.55)}
+.roleicon{font-size:54px;line-height:1}
+.rolename{font-size:25px;font-weight:800;letter-spacing:4px;margin-top:10px}
+.roledesc{font-size:13.5px;color:#8a8aa0;line-height:1.8;margin-top:12px}
+.matebox{margin-top:14px;padding:10px 14px;background:rgba(176,58,58,.13);border:1px solid rgba(176,58,58,.35);border-radius:11px;font-size:14px;color:#e8a0a0}
+.nightlabel{font-size:13px;letter-spacing:6px;color:#7a7aa0}
+.moon{font-size:64px;line-height:1;margin:10px 0;animation:float 3s ease-in-out infinite}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+.topbadge{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;font-size:13px;color:#8a8aa0}
+.topbadge .rb{padding:4px 12px;border-radius:8px;font-weight:700;font-size:13px}
+.rb.wolf{background:rgba(176,58,58,.18);color:#e88a8a}
+.rb.god{background:rgba(58,110,176,.18);color:#8ab4e8}
+.rb.good{background:rgba(58,139,92,.18);color:#8ad0a6}
+.deathbox{width:100%;padding:22px 18px;border-radius:16px;font-size:17px;line-height:1.8;border:1px solid #2e2e48;background:#1a1a2b;margin:10px 0}
+.deathbox.bad{border-color:rgba(176,58,58,.5);color:#e88a8a}
+.deathbox.good{border-color:rgba(58,139,92,.5);color:#8ad0a6}
+.votelist{display:flex;flex-direction:column;gap:8px;background:#171728;border-radius:14px;padding:14px}
+.voterow{display:flex;justify-content:space-between;font-size:15px;color:#c0c0d4;padding:5px 2px}
+.voterow .vc{color:#8a8aa0}
+.verdict-box{text-align:center;padding:16px;border-radius:13px;font-size:16px;font-weight:700;background:#1e1e33;border:1px solid #2e2e48;color:#b0b0c8}
+.verdict-box.bad{background:rgba(176,58,58,.14);border-color:rgba(176,58,58,.5);color:#e88a8a}
+.overhead{font-size:26px;font-weight:800;letter-spacing:3px;padding:22px 16px;border-radius:18px;width:100%;margin-bottom:14px;border:1px solid #2e2e48}
+.overhead.wolf{color:#e88a8a;background:rgba(176,58,58,.13);border-color:rgba(176,58,58,.5)}
+.overhead.good{color:#8ad0a6;background:rgba(58,139,92,.13);border-color:rgba(58,139,92,.5)}
+.playerlist{width:100%;display:flex;flex-direction:column;gap:7px}
+.plrow{display:flex;align-items:center;justify-content:space-between;background:#1a1a2b;border:1px solid #26263c;border-radius:12px;padding:12px 15px;font-size:14.5px}
+.plrow.dead{opacity:.42}
+.plid{color:#8a8aa0;width:52px;text-align:left}
+.plrole{flex:1;text-align:center;font-weight:600}
+.plrole.wolf{color:#e88a8a}
+.plrole.god{color:#8ab4e8}
+.plrole.good{color:#8ad0a6}
+.plstate{width:44px;text-align:right;font-size:12px;color:#6a6a84}
+.err{color:#e06c6c;font-size:14px;text-align:center;margin-top:10px}
+.spinner{width:26px;height:26px;border:3px solid #2e2e48;border-top-color:#d4af37;border-radius:50%;animation:spin .8s linear infinite;margin:16px 0}
+@keyframes spin{to{transform:rotate(360deg)}}
+.seerresult{width:100%;max-width:300px;border-radius:20px;padding:30px 20px;margin:10px 0;border:1px solid #2e2e48;background:#1a1a2b;text-align:center}
+.seerresult.bad{border-color:rgba(176,58,58,.6)}
+.seerresult.good{border-color:rgba(58,139,92,.6)}
+.resnum{font-size:44px;font-weight:800;color:#f0e2b0}
+.resverdict{font-size:24px;font-weight:800;letter-spacing:6px;margin-top:12px}
+.seerresult.bad .resverdict{color:#e06c6c}
+.seerresult.good .resverdict{color:#6cc98c}
+.code-box{background:#13131f;border:2px solid #3a3a5c;border-radius:14px;padding:20px;text-align:center;margin:14px 0}
+.code-box .lbl{font-size:12px;color:#7c7c96;letter-spacing:2px}
+.code-box .num{font-size:64px;font-weight:800;color:#d4af37;letter-spacing:14px;margin:8px 0 0;font-family:Consolas,monospace;text-indent:14px}
+.share-tip{text-align:center;font-size:12.5px;color:#6a6a84;line-height:1.8;margin-top:10px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<script>
+/* ============================================================
+   全局状态
+   ============================================================ */
+var ROLE_INFO = {
+  wolf:     { name:'狼人',   team:'wolf', icon:'🐺', desc:'每晚与同伴共同击杀一名玩家。白天要隐藏身份。' },
+  seer:     { name:'预言家', team:'god',  icon:'🔮', desc:'每晚可查验一名玩家是「好人」还是「狼人」。' },
+  witch:    { name:'女巫',   team:'god',  icon:'🧪', desc:'拥有解药和毒药各一瓶，全局各只能使用一次。' },
+  hunter:   { name:'猎人',   team:'god',  icon:'🔫', desc:'死亡时可开枪带走一名玩家（被毒杀除外）。' },
+  guard:    { name:'守卫',   team:'god',  icon:'🛡️', desc:'每晚守护一名玩家，不能连续两晚守护同一人。' },
+  villager: { name:'村民',   team:'good', icon:'👤', desc:'没有技能，凭借推理和投票找出隐藏的狼人。' }
+};
+var ROLE_LIST = {
+  6:  ['wolf','wolf','seer','witch','villager','villager'],
+  7:  ['wolf','wolf','seer','witch','hunter','villager','villager'],
+  8:  ['wolf','wolf','wolf','seer','witch','hunter','villager','villager'],
+  9:  ['wolf','wolf','wolf','seer','witch','hunter','villager','villager','villager'],
+  10: ['wolf','wolf','wolf','seer','witch','hunter','guard','villager','villager','villager'],
+  11: ['wolf','wolf','wolf','wolf','seer','witch','hunter','guard','villager','villager','villager'],
+  12: ['wolf','wolf','wolf','wolf','seer','witch','hunter','guard','villager','villager','villager','villager']
+};
+
+var peer = null;
+var isHost = false;
+var myName = '';
+var hostPeerId = null;
+var connections = new Map();
+var hostConn = null;
+var host = null;
+var G = null;
+var lastErr = '';
+var witchSel = { heal: undefined, poison: undefined };
+var connecting = false;
+var myRole = null;
+
+/* ============================================================
+   工具
+   ============================================================ */
+function $id(x){ return document.getElementById(x) }
+function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c] }) }
+function shuffle(a){ for(var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=a[i]; a[i]=a[j]; a[j]=t } return a }
+
+/* ============================================================
+   房主：创建房间
+   ============================================================ */
+function createRoom(){
+  var name = ($id('nameIpt') && $id('nameIpt').value.trim()) || '玩家';
+  myName = name;
+  localStorage.setItem('wolf_name', name);
+  lastErr = '';
+  render(); // 显示加载中
+  connectAsHost(name);
+}
+
+function connectAsHost(name){
+  var code = String(Math.floor(1000 + Math.random() * 9000));
+  hostPeerId = 'wolfgame-' + code;
+  peer = new Peer(hostPeerId, { debug: 1 });
+
+  var opened = false;
+  var timeout = setTimeout(function(){
+    if(!opened){ lastErr = '连接信令服务器超时，请检查网络'; render(); }
+  }, 15000);
+
+  peer.on('open', function(id){
+    opened = true;
+    clearTimeout(timeout);
+    isHost = true;
+    host = createHostState(code, name);
+    G = buildHostViewFor(host.players.get(1));
+    render();
+  });
+
+  peer.on('error', function(err){
+    clearTimeout(timeout);
+    console.error('Peer 错误:', err);
+    if(err.type === 'unavailable-id'){
+      peer.destroy();
+      setTimeout(function(){ connectAsHost(name) }, 200);
+      return;
+    }
+    lastErr = '创建失败: ' + (err.type || err.message || '未知错误');
+    render();
+  });
+
+  peer.on('connection', function(conn){
+    conn.on('open', function(){
+      connections.set(conn.peer, conn);
+    });
+    conn.on('data', function(data){ handleClientMessage(conn, data) });
+    conn.on('close', function(){
+      connections.delete(conn.peer);
+      for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+        if(p.value.peerId === conn.peer){
+          p.value.connected = false;
+          broadcastHostState();
+          break;
+        }
+      }
+    });
+    conn.on('error', function(){});
+  });
+}
+
+function createHostState(code, hostName){
+  var s = {
+    code: code,
+    hostId: 1,
+    nextId: 2,
+    phase: 'lobby',
+    day: 0,
+    nightStep: 0,
+    night: {},
+    lastGuard: null,
+    witchHealUsed: false,
+    witchPoisonUsed: false,
+    deaths: [],
+    hunterId: null,
+    hunterAfter: null,
+    votes: {},
+    voteResult: null,
+    winner: null,
+    allRoles: null,
+    players: new Map()
+  };
+  s.players.set(1, {
+    id: 1, name: hostName, peerId: peer.id, role: null,
+    alive: true, connected: true, seerChecks: []
+  });
+  return s;
+}
+
+function handleClientMessage(conn, data){
+  if(!host) return;
+
+  if(data.type === 'join'){
+    if(host.phase !== 'lobby'){
+      conn.send({ type: 'error', msg: '游戏已开始，无法加入' });
+      return;
+    }
+    if(host.players.size >= 12){
+      conn.send({ type: 'error', msg: '房间已满' });
+      return;
+    }
+    var id = host.nextId++;
+    host.players.set(id, {
+      id: id,
+      name: (data.name || '玩家').slice(0, 8),
+      peerId: conn.peer,
+      role: null,
+      alive: true,
+      connected: true,
+      seerChecks: []
+    });
+    conn.send({ type: 'joined', playerId: id });
+    broadcastHostState();
+  }
+  else if(data.type === 'action'){
+    var player = null;
+    for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+      if(p.value.peerId === conn.peer){ player = p.value; break; }
+    }
+    if(!player) return;
+    hostHandleAction(player, data);
+  }
+}
+
+function broadcastHostState(){
+  if(!host) return;
+  G = buildHostViewFor(host.players.get(1));
+  render();
+  for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+    var pl = p.value;
+    if(pl.id === 1) continue;
+    var c = connections.get(pl.peerId);
+    if(c && c.open){
+      c.send({ type: 'update', state: buildHostViewFor(pl) });
+    }
+  }
+}
+
+function buildHostViewFor(player){
+  var playersArr = [];
+  for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+    var pl = p.value;
+    playersArr.push({ id: pl.id, name: pl.name, connected: pl.connected, alive: pl.alive });
+  }
+  return {
+    code: host.code,
+    hostId: host.hostId,
+    players: playersArr,
+    you: {
+      id: player.id,
+      name: player.name,
+      isHost: player.id === host.hostId,
+      alive: player.alive,
+      role: player.role,
+      seerChecks: player.role === 'seer' ? player.seerChecks : undefined
+    },
+    phase: host.phase,
+    day: host.day,
+    nightStep: host.nightStep,
+    deaths: host.deaths,
+    voteResult: host.voteResult,
+    hunterId: host.hunterId,
+    winner: host.winner,
+    allRoles: host.allRoles,
+    prompt: buildPromptFor(player)
+  };
+}
+
+/* ============================================================
+   客户端：加入房间
+   ============================================================ */
+function joinRoom(){
+  var name = ($id('nameIpt') && $id('nameIpt').value.trim()) || '玩家';
+  var code = ($id('codeIpt') && $id('codeIpt').value.trim()) || '';
+  if(!/^\d{4}$/.test(code)){ lastErr = '请输入 4 位房间号'; render(); return; }
+  myName = name;
+  localStorage.setItem('wolf_name', name);
+  lastErr = '';
+  render();
+  connectAsClient(code, name);
+}
+
+function connectAsClient(code, name){
+  isHost = false;
+  peer = new Peer({ debug: 1 });
+
+  var opened = false;
+  var timeout = setTimeout(function(){
+    if(!opened){ lastErr = '信令服务器连接超时'; render(); }
+  }, 15000);
+
+  peer.on('open', function(){
+    opened = true;
+    clearTimeout(timeout);
+    hostConn = peer.connect('wolfgame-' + code, { reliable: true });
+    var connTimeout = setTimeout(function(){
+      if(hostConn && !hostConn.open){
+        lastErr = '找不到房间 ' + code + '，请确认房主已创建';
+        render();
+      }
+    }, 12000);
+
+    hostConn.on('open', function(){
+      clearTimeout(connTimeout);
+      hostConn.send({ type: 'join', name: name });
+    });
+    hostConn.on('data', function(data){
+      if(data.type === 'joined'){
+        // 记录自己的 playerId（可选）
+      } else if(data.type === 'update'){
+        G = data.state;
+        if(!G.prompt || G.prompt.kind !== 'witch') witchSel = { heal: undefined, poison: undefined };
+        render();
+      } else if(data.type === 'error'){
+        lastErr = data.msg;
+        render();
+      }
+    });
+    hostConn.on('close', function(){
+      lastErr = '与房主断开连接';
+      G = null;
+      render();
+    });
+    hostConn.on('error', function(err){
+      lastErr = '连接出错: ' + (err.type || err.message);
+      render();
+    });
+  });
+
+  peer.on('error', function(err){
+    clearTimeout(timeout);
+    console.error(err);
+    if(err.type === 'peer-unavailable'){
+      lastErr = '房间不存在，请检查房间号';
+    } else {
+      lastErr = '连接失败: ' + (err.type || err.message);
+    }
+    render();
+  });
+}
+
+/* ============================================================
+   游戏逻辑（房主侧运行）
+   ============================================================ */
+function buildPromptFor(player){
+  if(host.phase === 'hunter' && player.id === host.hunterId){
+    var targets = [];
+    for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+      if(p.value.alive && p.value.id !== player.id) targets.push(p.value.id);
+    }
+    return { kind: 'hunter', targets: targets };
+  }
+  if(!player.alive) return null;
+
+  if(host.phase === 'night'){
+    var step = host.nightStep;
+    if(step === 0 && player.role === 'guard'){
+      var gts = [];
+      for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+        if(p.value.alive && p.value.id !== host.lastGuard) gts.push(p.value.id);
+      }
+      return { kind:'guard', targets:gts, note: host.lastGuard ? ('上一晚守护了 ' + host.lastGuard + ' 号') : '' };
+    }
+    if(step === 1 && player.role === 'wolf'){
+      var wts = [], mates = [];
+      for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+        var pl = p.value;
+        if(!pl.alive) continue;
+        if(pl.role !== 'wolf') wts.push(pl.id);
+        else if(pl.id !== player.id) mates.push(pl.id);
+      }
+      return { kind:'wolf', targets:wts, mates:mates };
+    }
+    if(step === 2 && player.role === 'witch'){
+      var canHeal = !host.witchHealUsed && host.night.wolfTarget != null;
+      var canPoison = !host.witchPoisonUsed;
+      if(!canHeal && !canPoison) return null;
+      var pts = [];
+      for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+        if(p.value.alive && p.value.id !== player.id) pts.push(p.value.id);
+      }
+      return { kind:'witch', canHeal:canHeal, canPoison:canPoison, wolfVictim:host.night.wolfTarget, targets:pts };
+    }
+    if(step === 3 && player.role === 'seer'){
+      if(host.night.seerTarget != null){
+        var t = host.players.get(host.night.seerTarget);
+        var isWolf = t.role === 'wolf';
+        if(!player.seerChecks.some(function(c){return c.id === t.id})){
+          player.seerChecks.push({ id: t.id, isWolf: isWolf });
+        }
+        return { kind:'seerResult', targetId:t.id, isWolf:isWolf };
+      }
+      var sts = [];
+      for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+        if(p.value.alive && p.value.id !== player.id) sts.push(p.value.id);
+      }
+      return { kind:'seer', targets:sts };
+    }
+    return null;
+  }
+
+  if(host.phase === 'vote' && player.alive){
+    if(host.votes[player.id] != null) return null;
+    var vts = [];
+    for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+      if(p.value.alive && p.value.id !== player.id) vts.push(p.value.id);
+    }
+    return { kind:'vote', targets:vts };
+  }
+  return null;
+}
+
+function hostHandleAction(player, msg){
+  var kind = msg.kind, target = msg.target, data = msg.data;
+
+  if(host.phase === 'night'){
+    if(kind === 'guard' && player.role === 'guard' && host.nightStep === 0){
+      host.night.guardTarget = target;
+      advanceNight();
+    } else if(kind === 'wolf' && player.role === 'wolf' && host.nightStep === 1){
+      if(host.night.wolfTarget === undefined){
+        host.night.wolfTarget = target;
+        advanceNight();
+      }
+    } else if(kind === 'witch' && player.role === 'witch' && host.nightStep === 2){
+      if(data && data.heal && !host.witchHealUsed){ host.night.heal = true; host.witchHealUsed = true; }
+      if(data && data.poison && !host.witchPoisonUsed){ host.night.poison = data.poison; host.witchPoisonUsed = true; }
+      host.night.witchDone = true;
+      advanceNight();
+    } else if(kind === 'seer' && player.role === 'seer' && host.nightStep === 3){
+      if(target != null){
+        host.night.seerTarget = target;
+        broadcastHostState();
+      } else {
+        host.night.seerDone = true;
+        advanceNight();
+      }
+    } else if(kind === 'forceSkip' && player.id === host.hostId){
+      if(host.nightStep === 0){ host.night.guardTarget = null; host.nightStep = 1; }
+      else if(host.nightStep === 1){ host.night.wolfTarget = null; host.nightStep = 2; }
+      else if(host.nightStep === 2){ host.night.witchDone = true; host.nightStep = 3; }
+      else if(host.nightStep === 3){ host.night.seerDone = true; host.nightStep = 4; }
+      if(host.nightStep >= 4) resolveNight();
+      else broadcastHostState();
+    }
+    return;
+  }
+
+  if(host.phase === 'vote'){
+    if(kind === 'vote' && player.alive && host.votes[player.id] == null){
+      host.votes[player.id] = target;
+      var allVoted = true;
+      for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+        var pl = p.value;
+        if(pl.alive && host.votes[pl.id] == null){ allVoted = false; break; }
+      }
+      if(allVoted) applyVote();
+      else broadcastHostState();
+    }
+    return;
+  }
+
+  if(host.phase === 'hunter' && player.id === host.hunterId){
+    if(kind === 'hunter'){
+      if(target != null){
+        var t = host.players.get(target);
+        if(t) t.alive = false;
+      }
+      if(checkWin()){
+        host.phase = 'over';
+        host.allRoles = [];
+        for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+          host.allRoles.push({ id:p.value.id, role:p.value.role, alive:p.value.alive });
+        }
+        broadcastHostState();
+        return;
+      }
+      if(host.hunterAfter === 'night'){
+        host.phase = 'night'; host.day++; host.nightStep = 0; host.night = {};
+        host.deaths = []; host.hunterId = null;
+        broadcastHostState();
+      } else {
+        host.phase = 'discuss';
+        broadcastHostState();
+      }
+    }
+  }
+}
+
+function advanceNight(){
+  if(host.nightStep === 0 && host.night.guardTarget !== undefined) host.nightStep = 1;
+  else if(host.nightStep === 1 && host.night.wolfTarget !== undefined) host.nightStep = 2;
+  else if(host.nightStep === 2 && host.night.witchDone) host.nightStep = 3;
+  else if(host.nightStep === 3 && host.night.seerDone) host.nightStep = 4;
+  if(host.nightStep >= 4) resolveNight();
+  else broadcastHostState();
+}
+
+function resolveNight(){
+  var deaths = [];
+  var wt = host.night.wolfTarget;
+  if(wt != null){
+    var guarded = host.night.guardTarget === wt;
+    var healed = host.night.heal;
+    if(!guarded && !healed) deaths.push({ id: wt, cause: 'wolf' });
+  }
+  if(host.night.poison != null && !deaths.some(function(d){return d.id === host.night.poison})){
+    deaths.push({ id: host.night.poison, cause: 'poison' });
+  }
+  deaths.forEach(function(d){
+    var p = host.players.get(d.id);
+    if(p) p.alive = false;
+  });
+  host.lastGuard = host.night.guardTarget;
+  host.deaths = deaths;
+  host.phase = 'dawn';
+
+  var poisoned = {};
+  deaths.forEach(function(d){ if(d.cause === 'poison') poisoned[d.id] = true });
+  var hunter = null;
+  deaths.forEach(function(d){
+    var p = host.players.get(d.id);
+    if(p && p.role === 'hunter' && !poisoned[d.id]) hunter = d.id;
+  });
+  host.hunterId = hunter;
+  host.hunterAfter = 'discuss';
+  broadcastHostState();
+}
+
+function checkWin(){
+  var alive = [], wolves = 0;
+  for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+    if(p.value.alive){
+      alive.push(p.value);
+      if(p.value.role === 'wolf') wolves++;
+    }
+  }
+  var good = alive.length - wolves;
+  if(alive.length === 0){ host.winner = 'wolf'; return true; }
+  if(wolves === 0){ host.winner = 'good'; return true; }
+  if(wolves >= good){ host.winner = 'wolf'; return true; }
+  host.winner = null;
+  return false;
+}
+
+function applyVote(){
+  var counts = {};
+  for(var k in host.votes){
+    var t = host.votes[k];
+    counts[t] = (counts[t] || 0) + 1;
+  }
+  var max = 0, top = [];
+  for(var k in counts){
+    var n = counts[k];
+    if(n > max){ max = n; top = [Number(k)]; }
+    else if(n === max) top.push(Number(k));
+  }
+  host.voteResult = { counts: counts, top: top };
+  host.phase = 'voteResult';
+  broadcastHostState();
+}
+
+function hostStartGame(){
+  var n = host.players.size;
+  if(n < 6 || n > 12) return false;
+  var roles = shuffle(ROLE_LIST[n].slice());
+  var ids = [];
+  for(var it = host.players.keys(), p = it.next(); !p.done; p = it.next()) ids.push(p.value);
+  ids.forEach(function(id, i){
+    var p = host.players.get(id);
+    p.role = roles[i];
+    p.alive = true;
+    p.seerChecks = [];
+  });
+  host.phase = 'night'; host.day = 1; host.nightStep = 0; host.night = {};
+  host.lastGuard = null; host.witchHealUsed = false; host.witchPoisonUsed = false;
+  host.deaths = []; host.hunterId = null; host.hunterAfter = null;
+  host.votes = {}; host.voteResult = null; host.winner = null; host.allRoles = null;
+  broadcastHostState();
+  return true;
+}
+
+function hostContinue(){
+  if(host.phase === 'dawn'){
+    if(host.hunterId){ host.phase = 'hunter'; broadcastHostState(); return; }
+    host.phase = 'discuss'; broadcastHostState(); return;
+  }
+  if(host.phase === 'discuss'){
+    host.phase = 'vote'; host.votes = {}; host.voteResult = null;
+    broadcastHostState(); return;
+  }
+  if(host.phase === 'voteResult'){
+    var vr = host.voteResult;
+    var votedOut = null;
+    if(vr.top.length === 1){
+      var p = host.players.get(vr.top[0]);
+      if(p){ p.alive = false; votedOut = p; }
+    }
+    if(checkWin()){
+      host.phase = 'over';
+      host.allRoles = [];
+      for(var it = host.players.values(), pp = it.next(); !pp.done; pp = it.next()){
+        host.allRoles.push({ id:pp.value.id, role:pp.value.role, alive:pp.value.alive });
+      }
+      broadcastHostState(); return;
+    }
+    if(votedOut && votedOut.role === 'hunter'){
+      host.hunterId = votedOut.id; host.hunterAfter = 'night'; host.phase = 'hunter';
+      broadcastHostState(); return;
+    }
+    host.phase = 'night'; host.day++; host.nightStep = 0; host.night = {};
+    host.deaths = []; host.voteResult = null; host.hunterId = null;
+    broadcastHostState(); return;
+  }
+  if(host.phase === 'over') restartHost();
+}
+
+function restartHost(){
+  host.phase = 'lobby'; host.day = 0; host.nightStep = 0; host.night = {};
+  host.lastGuard = null; host.witchHealUsed = false; host.witchPoisonUsed = false;
+  host.deaths = []; host.hunterId = null; host.hunterAfter = null;
+  host.votes = {}; host.voteResult = null; host.winner = null; host.allRoles = null;
+  for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+    p.value.role = null; p.value.alive = true; p.value.seerChecks = [];
+  }
+  broadcastHostState();
+}
+
+/* ============================================================
+   玩家动作分发
+   ============================================================ */
+function sendAction(kind, target, data){
+  if(isHost){
+    var me = host.players.get(1);
+    hostHandleAction(me, { kind: kind, target: target, data: data });
+  } else {
+    if(hostConn && hostConn.open){
+      hostConn.send({ type: 'action', kind: kind, target: target, data: data });
+    }
+  }
+}
+
+function doStart(){
+  if(isHost){
+    if(!hostStartGame()){ lastErr = '人数必须 6-12 人'; render(); }
+  }
+}
+function doContinue(){
+  if(isHost) hostContinue();
+}
+function doRestart(){
+  if(isHost) restartHost();
+}
+
+function act(kind, target, data){ sendAction(kind, target, data) }
+
+function setHeal(v){ witchSel.heal = v; render() }
+function setPoison(v){ witchSel.poison = v; render() }
+function confirmWitch(canHeal, canPoison){
+  if(canHeal && witchSel.heal === undefined) return;
+  if(canPoison && witchSel.poison === undefined) return;
+  act('witch', null, {
+    heal: canHeal ? !!witchSel.heal : false,
+    poison: canPoison ? witchSel.poison : null
+  });
+}
+
+/* ============================================================
+   渲染
+   ============================================================ */
+function render(){
+  var app = $id('app');
+  if(!G){ app.innerHTML = viewEntry(); return; }
+  var ph = G.phase, html;
+  if(ph === 'lobby')       html = viewLobby();
+  else if(ph === 'night')  html = viewNight();
+  else if(ph === 'dawn')   html = viewDawn();
+  else if(ph === 'hunter') html = viewHunter();
+  else if(ph === 'discuss')html = viewDiscuss();
+  else if(ph === 'vote')   html = viewVote();
+  else if(ph === 'voteResult') html = viewVoteResult();
+  else if(ph === 'over')   html = viewOver();
+  else html = '<div class="center-screen"><div class="spinner"></div></div>';
+  app.innerHTML = html;
+}
+
+function viewEntry(){
+  var savedName = localStorage.getItem('wolf_name') || '';
+  var err = lastErr ? '<div class="err">' + esc(lastErr) + '</div>' : '';
+  var loading = connecting ? '<div class="center-screen"><div class="spinner"></div><p class="muted">正在连接信令服务器…</p></div>' : '';
+
+  if(connecting){
+    return '<div class="title">狼 人 杀</div>' + loading;
+  }
+
+  return '<div class="title">狼 人 杀</div>' +
+    '<div class="subtitle">手机联机 · 无需服务器</div>' +
+    '<div class="card"><div class="label">你的昵称</div>' +
+    '<input class="ipt" id="nameIpt" maxlength="8" placeholder="输入昵称" value="' + esc(savedName) + '"></div>' +
+    '<button class="primary big" onclick="createRoom()">创 建 房 间</button>' +
+    '<div class="divider">— 或 —</div>' +
+    '<div class="card"><div class="label">房间号</div>' +
+    '<input class="ipt" id="codeIpt" maxlength="4" inputmode="numeric" pattern="[0-9]*" placeholder="4 位数字"></div>' +
+    '<button class="ghost" onclick="joinRoom()">加 入 房 间</button>' + err +
+    '<p class="muted" style="margin-top:26px;font-size:12.5px;line-height:1.9">' +
+    '· 房主创建后，把 4 位房间号告诉朋友<br>' +
+    '· 朋友在同一个页面输入房间号加入<br>' +
+    '· 至少 6 人（最多 12 人）才能开始游戏<br>' +
+    '· 同一 WiFi 或手机热点下连接最稳</p>';
+}
+
+function viewLobby(){
+  var me = G.you, n = G.players.length;
+  var canStart = me.isHost && n >= 6 && n <= 12;
+  var rows = G.players.map(function(p, i){
+    var meTag = p.id === me.id ? ' <span style="color:#8a8aa0;font-size:12px">(你)</span>' : '';
+    var hostTag = p.id === G.hostId ? '<span class="ptag host">房主</span>' : '';
+    var offTag = p.connected ? '' : '<span class="ptag">掉线</span>';
+    return '<div class="prow ' + (p.connected ? '' : 'off') + ' ' + (p.id === me.id ? 'me' : '') + '">' +
+      '<div class="avatar">' + (i + 1) + '</div>' +
+      '<div class="pname">' + esc(p.name) + meTag + '</div>' + hostTag + offTag + '</div>';
+  }).join('');
+  var tip = '';
+  if(n < 6) tip = '<p class="muted">还需要 ' + (6 - n) + ' 人才能开始</p>';
+  else if(n > 12) tip = '<p class="muted">人数过多，最多 12 人</p>';
+  var btn = me.isHost
+    ? '<button class="primary big" onclick="doStart()" ' + (canStart ? '' : 'disabled') + '>开 始 游 戏</button>'
+    : '<p class="muted" style="text-align:center;margin-top:20px">等待房主开始游戏…</p>';
+
+  var shareBlock = me.isHost
+    ? '<div class="code-box"><div class="lbl">房 间 号</div><div class="num">' + G.code + '</div></div>' +
+      '<p class="share-tip">把这个房间号发给朋友<br>他们在同一页面输入即可加入</p>'
+    : '';
+
+  return '<div class="panel">' + shareBlock +
+    '<div class="label" style="margin-top:8px">玩家列表 (' + n + '/12)</div>' +
+    '<div class="plist">' + rows + '</div>' + tip + btn + '</div>';
+}
+
+function topBadge(){
+  var me = G.you, r = me.role ? ROLE_INFO[me.role] : null;
+  var rb = r ? '<span class="rb ' + r.team + '">' + r.icon + ' ' + r.name + '</span>' : '';
+  return '<div class="topbadge"><span>' + G.code + ' 房 · 第 ' + (G.day || 0) + ' 天</span>' + rb + '</div>';
+}
+
+function deadBanner(){
+  return '<div class="center-screen">' + topBadge() +
+    '<div style="font-size:56px">💀</div>' +
+    '<div class="bigmsg">你已出局</div>' +
+    '<p class="muted">观战中，请勿透露他人身份</p></div>';
+}
+
+function viewNight(){
+  var me = G.you, p = G.prompt;
+  if(!me.alive) return deadBanner();
+  if(p){
+    if(p.kind === 'guard')      return viewGuardPrompt(p);
+    if(p.kind === 'wolf')       return viewWolfPrompt(p);
+    if(p.kind === 'witch')      return viewWitchPrompt(p);
+    if(p.kind === 'seer')       return viewSeerPrompt(p);
+    if(p.kind === 'seerResult') return viewSeerResult(p);
+  }
+  var stepName = G.nightStep != null ? (['守卫','狼人','女巫','预言家'][G.nightStep] || '') : '';
+  var skip = me.isHost ? '<button class="ghost" style="max-width:200px;margin-top:20px" onclick="act(\'forceSkip\',null)">强制继续</button>' : '';
+  return '<div class="center-screen">' + topBadge() +
+    '<div class="nightlabel">第 ' + G.day + ' 夜</div>' +
+    '<div class="moon">🌙</div>' +
+    '<div class="bigmsg">天黑了，请闭眼</div>' +
+    '<p class="muted">' + (stepName ? stepName + ' 正在行动…' : '夜晚进行中…') + '</p>' + skip + '</div>';
+}
+
+function viewGuardPrompt(p){
+  var note = p.note ? '<p class="hint">' + esc(p.note) + '</p>' : '';
+  var btns = p.targets.map(function(id){ return '<button class="pcard" onclick="act(\'guard\',' + id + ')">' + id + '号</button>' }).join('');
+  return '<div class="panel">' + topBadge() +
+    '<div class="phasehead">🛡️ 守卫行动</div>' +
+    '<p class="muted">选择今晚要守护的玩家</p>' + note +
+    '<div class="grid">' + btns + '</div></div>';
+}
+
+function viewWolfPrompt(p){
+  var mates = p.mates.length ? p.mates.join('号、') + '号' : '无（独狼）';
+  var btns = p.targets.map(function(id){ return '<button class="pcard" onclick="act(\'wolf\',' + id + ')">' + id + '号</button>' }).join('');
+  return '<div class="panel">' + topBadge() +
+    '<div class="phasehead">🐺 狼人行动</div>' +
+    '<div class="matebox">狼队友：<b>' + mates + '</b></div>' +
+    '<p class="muted">选择今晚要击杀的目标</p>' +
+    '<div class="grid">' + btns + '</div></div>';
+}
+
+function viewWitchPrompt(p){
+  var needHeal = p.canHeal, needPoison = p.canPoison;
+  var ready = (!needHeal || witchSel.heal !== undefined) && (!needPoison || witchSel.poison !== undefined);
+  var healBlock = '';
+  if(needHeal){
+    if(witchSel.heal === undefined){
+      healBlock = '<div class="label" style="margin-top:6px">解药</div>' +
+        '<button class="primary" onclick="setHeal(true)">使用解药，救 ' + p.wolfVictim + ' 号</button>' +
+        '<button class="ghost" style="margin-top:8px" onclick="setHeal(false)">不使用解药</button>';
+    } else {
+      healBlock = '<div class="label" style="margin-top:6px">解药：' + (witchSel.heal ? '✅ 使用' : '❌ 不使用') + '</div>';
+    }
+  }
+  var poisonBlock = '';
+  if(needPoison){
+    if(witchSel.poison === undefined){
+      var pbtns = p.targets.map(function(id){ return '<button class="pcard" onclick="setPoison(' + id + ')">' + id + '号</button>' }).join('');
+      poisonBlock = '<div class="label" style="margin-top:6px">毒药</div><div class="grid">' + pbtns + '</div>' +
+        '<button class="ghost" style="margin-top:8px" onclick="setPoison(null)">不使用毒药</button>';
+    } else {
+      poisonBlock = '<div class="label" style="margin-top:6px">毒药：' + (witchSel.poison ? '✅ ' + witchSel.poison + ' 号' : '❌ 不使用') + '</div>';
+    }
+  }
+  var confirmBtn = (needHeal || needPoison)
+    ? '<button class="primary big" onclick="confirmWitch(' + needHeal + ',' + needPoison + ')" ' + (ready ? '' : 'disabled') + '>确 认</button>'
+    : '';
+  var victimTxt = p.wolfVictim != null ? '今晚倒牌的是 <b class="hl">' + p.wolfVictim + '号</b>' : '今晚是平安夜';
+  return '<div class="panel">' + topBadge() +
+    '<div class="phasehead">🧪 女巫行动</div>' +
+    '<div class="statusbar"><span>解药 ' + (p.canHeal ? '✅ 可用' : '❌ 已用') + '</span><span>毒药 ' + (p.canPoison ? '✅ 可用' : '❌ 已用') + '</span></div>' +
+    '<div class="bigmsg">' + victimTxt + '</div>' + healBlock + poisonBlock + confirmBtn + '</div>';
+}
+
+function viewSeerPrompt(p){
+  var hist = (G.you.seerChecks && G.you.seerChecks.length)
+    ? '<p class="hint">往期查验：' + G.you.seerChecks.map(function(c){ return c.id + '号=' + (c.isWolf ? '狼' : '好人') }).join('，') + '</p>'
+    : '';
+  var btns = p.targets.map(function(id){ return '<button class="pcard" onclick="act(\'seer\',' + id + ')">' + id + '号</button>' }).join('');
+  return '<div class="panel">' + topBadge() +
+    '<div class="phasehead">🔮 预言家行动</div>' +
+    '<p class="muted">选择今晚要查验的玩家</p>' + hist +
+    '<div class="grid">' + btns + '</div></div>';
+}
+
+function viewSeerResult(p){
+  return '<div class="panel center">' + topBadge() +
+    '<div class="phasehead">🔮 查验结果</div>' +
+    '<div class="seerresult ' + (p.isWolf ? 'bad' : 'good') + '">' +
+    '<div class="resnum">' + p.targetId + ' 号</div>' +
+    '<div class="resverdict">' + (p.isWolf ? '狼 人' : '好 人') + '</div></div>' +
+    '<button class="primary big" onclick="act(\'seer\',null)">确认，闭眼</button></div>';
+}
+
+function viewDawn(){
+  var me = G.you, deaths = G.deaths || [];
+  var txt = deaths.length ? deaths.map(function(d){ return d.id + '号' }).join('、') + ' 死亡' : '平安夜，没有人死亡';
+  var hasDeath = deaths.length > 0;
+  var btn = me.isHost
+    ? '<button class="primary big" onclick="doContinue()">继 续</button>'
+    : '<p class="muted">等待房主继续…</p>';
+  return '<div class="panel center">' + topBadge() +
+    '<div style="font-size:44px;margin:10px 0">' + (hasDeath ? '🌅' : '🌈') + '</div>' +
+    '<div style="font-size:24px;font-weight:800;letter-spacing:4px;color:#f0d98a">第 ' + G.day + ' 天</div>' +
+    '<div class="deathbox ' + (hasDeath ? 'bad' : 'good') + '">' + txt + '</div>' + btn + '</div>';
+}
+
+function viewHunter(){
+  var me = G.you, isMe = me.id === G.hunterId;
+  if(!isMe){
+    return '<div class="panel center">' + topBadge() +
+      '<div style="font-size:52px;margin:20px 0">🔫</div>' +
+      '<div class="bigmsg">' + G.hunterId + ' 号 猎人 翻牌</div>' +
+      '<p class="muted">等待猎人选择开枪目标…</p></div>';
+  }
+  var p = G.prompt;
+  var targets = p ? p.targets : G.players.filter(function(x){ return x.alive && x.id !== me.id }).map(function(x){ return x.id });
+  var btns = targets.map(function(id){ return '<button class="pcard" onclick="act(\'hunter\',' + id + ')">' + id + '号</button>' }).join('');
+  return '<div class="panel">' + topBadge() +
+    '<div class="phasehead">🔫 猎人开枪</div>' +
+    '<div class="bigmsg">你已死亡，可以带走一名玩家</div>' +
+    '<div class="grid">' + btns + '</div>' +
+    '<button class="ghost" onclick="act(\'hunter\',null)">放弃开枪</button></div>';
+}
+
+function viewDiscuss(){
+  var me = G.you;
+  var alive = G.players.filter(function(p){ return p.alive });
+  var dead  = G.players.filter(function(p){ return !p.alive });
+  var deadLine = dead.length ? '<p class="muted">出局：' + dead.map(function(p){ return p.id + '号' }).join('、') + '</p>' : '';
+  var btn = me.isHost
+    ? '<button class="primary big" onclick="doContinue()">开始投票</button>'
+    : '<p class="muted" style="text-align:center;margin-top:16px">等待房主发起投票…</p>';
+  return '<div class="panel">' + topBadge() +
+    '<div class="phasehead">☀️ 第 ' + G.day + ' 天 · 讨论</div>' +
+    '<div class="bigmsg">存活：' + alive.map(function(p){ return p.id + '号' }).join('、') + '</div>' + deadLine +
+    '<p class="muted">请自由发言，找出隐藏的狼人</p>' + btn + '</div>';
+}
+
+function viewVote(){
+  var me = G.you;
+  if(!me.alive) return deadBanner();
+  var p = G.prompt;
+  if(p && p.kind === 'vote'){
+    var btns = p.targets.map(function(id){ return '<button class="pcard" onclick="act(\'vote\',' + id + ')">' + id + '号</button>' }).join('');
+    return '<div class="panel">' + topBadge() +
+      '<div class="phasehead">🗳️ 请投票</div>' +
+      '<p class="muted">选择你认为的狼人</p>' +
+      '<div class="grid">' + btns + '</div></div>';
+  }
+  return '<div class="center-screen">' + topBadge() +
+    '<div style="font-size:52px">🗳️</div>' +
+    '<div class="bigmsg">你已完成投票</div>' +
+    '<p class="muted">等待其他玩家投票…</p></div>';
+}
+
+function viewVoteResult(){
+  var me = G.you, vr = G.voteResult || { counts:{}, top:[] };
+  var sorted = Object.entries(vr.counts).sort(function(a,b){ return b[1] - a[1] });
+  var rows = sorted.map(function(kv){
+    return '<div class="voterow"><span>' + kv[0] + '号</span><span class="vc">' + kv[1] + ' 票</span></div>';
+  }).join('') || '<div class="muted">无有效票</div>';
+  var verdict = vr.top.length === 1
+    ? '<div class="verdict-box bad">' + vr.top[0] + '号 被投票出局</div>'
+    : '<div class="verdict-box">平票（' + vr.top.map(function(i){ return i + '号' }).join('、') + '），本轮无人出局</div>';
+  var btn = me.isHost
+    ? '<button class="primary big" onclick="doContinue()">继 续</button>'
+    : '<p class="muted" style="text-align:center">等待房主继续…</p>';
+  return '<div class="panel">' + topBadge() +
+    '<div class="phasehead">🗳️ 投票结果</div>' +
+    '<div class="votelist">' + rows + '</div>' + verdict + btn + '</div>';
+}
+
+function viewOver(){
+  var me = G.you, good = G.winner === 'good';
+  var all = G.allRoles || [];
+  var rows = all.map(function(p){
+    var r = ROLE_INFO[p.role] || { name:'?', team:'good', icon:'❔' };
+    return '<div class="plrow ' + (p.alive ? '' : 'dead') + '">' +
+      '<span class="plid">' + p.id + '号</span>' +
+      '<span class="plrole ' + r.team + '">' + r.icon + ' ' + r.name + '</span>' +
+      '<span class="plstate">' + (p.alive ? '存活' : '出局') + '</span></div>';
+  }).join('');
+  var btn = me.isHost
+    ? '<button class="primary big" onclick="doRestart()">再 来 一 局</button>'
+    : '<p class="muted" style="text-align:center">等待房主开启新一局…</p>';
+  return '<div class="panel center" style="justify-content:flex-start;padding-top:6px">' +
+    '<div class="overhead ' + (good ? 'good' : 'wolf') + '">' + (good ? '🎉 好人阵营获胜' : '🐺 狼人阵营获胜') + '</div>' +
+    '<div class="playerlist">' + rows + '</div>' + btn + '</div>';
+}
+
+/* ============================================================
+   启动
+   ============================================================ */
+render();
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>

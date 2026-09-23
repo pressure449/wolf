@@ -1,0 +1,24 @@
+{
+  "name": "狼人杀",
+  "short_name": "狼人杀",
+  "description": "手机联机狼人杀",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0e0e18",
+  "theme_color": "#0e0e18",
+  "icons": [
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
