@@ -193,15 +193,47 @@ function connectAsHost(name){
     });
     conn.on('data', function(data){ handleClientMessage(conn, data) });
     conn.on('close', function(){
-      connections.delete(conn.peer);
-      for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
-        if(p.value.peerId === conn.peer){
-          p.value.connected = false;
-          broadcastHostState();
-          break;
+  connections.delete(conn.peer);
+  var removedPlayer = null;
+  for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+    if(p.value.peerId === conn.peer){
+      removedPlayer = p.value;
+      break;
+    }
+  }
+  if(removedPlayer){
+    // 1. 直接从玩家列表里剔除
+    host.players.delete(removedPlayer.id);
+
+    // 2. 如果正在投票，把它的票也一起清掉
+    if(host.phase === 'vote' && host.votes[removedPlayer.id] !== undefined){
+      delete host.votes[removedPlayer.id];
+    }
+
+    // 3. 如果游戏正在进行中，判断是否影响胜负
+    if(host.phase !== 'lobby' && host.phase !== 'over'){
+      if(checkWin()){
+        host.phase = 'over';
+        host.allRoles = [];
+        for(var it2 = host.players.values(), p2 = it2.next(); !p2.done; p2 = it2.next()){
+          host.allRoles.push({ id:p2.value.id, role:p2.value.role, alive:p2.value.alive });
+        }
+      } else if (host.phase === 'vote') {
+        // 如果刚好有人离开导致所有人都已投完票，直接结算
+        var allVoted = true;
+        for(var it3 = host.players.values(), p3 = it3.next(); !p3.done; p3 = it3.next()){
+          var pl = p3.value;
+          if(pl.alive && host.votes[pl.id] == null){ allVoted = false; break; }
+        }
+        if(allVoted && host.alivePlayers().length > 0){
+          applyVote();
         }
       }
-    });
+    }
+
+    broadcastHostState();
+  }
+});
     conn.on('error', function(){});
   });
 }
