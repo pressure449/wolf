@@ -94,18 +94,22 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .seerresult.bad .resverdict{color:#e06c6c}
 .seerresult.good .resverdict{color:#6cc98c}
 .sheriff-tag{color:#d4af37;font-size:12px;margin-left:4px}
+.netstatus{position:fixed;top:8px;right:8px;font-size:11px;padding:3px 8px;border-radius:6px;z-index:99}
+.netstatus.on{color:#8ad0a6;background:rgba(58,139,92,.15)}
+.netstatus.off{color:#e88a8a;background:rgba(176,58,58,.15)}
 </style>
 </head>
 <body>
 <div id="app"></div>
+<div id="net" class="netstatus off">未连接</div>
 
-<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <script>
 /* ============================================================
    全局状态
    ============================================================ */
 var ROLE_INFO = {
-  wolf:     { name:'狼人',   team:'wolf', icon:'🐺', desc:'每晚与同伴共同击杀一名玩家。白天要隐藏身份。' },
+  wolf:     { name:'狼人',   team:'wolf', icon:'🐺', desc:'每晚与同伴共同击杀一名玩家。' },
   seer:     { name:'预言家', team:'god',  icon:'🔮', desc:'每晚可查验一名玩家是「好人」还是「狼人」。' },
   witch:    { name:'女巫',   team:'god',  icon:'🧪', desc:'拥有解药和毒药各一瓶，全局各只能使用一次。' },
   hunter:   { name:'猎人',   team:'god',  icon:'🔫', desc:'死亡时可开枪带走一名玩家（被毒杀除外）。' },
@@ -122,18 +126,18 @@ var ROLE_LIST = {
   12: ['wolf','wolf','wolf','wolf','seer','witch','hunter','guard','villager','villager','villager','villager']
 };
 
-var peer = null;
+var mqttClient = null;
+var roomTopic = null;
+var myTag = '';
 var isHost = false;
-var myName = '';
-var hostPeerId = null;
-var connections = new Map();
-var hostConn = null;
 var host = null;
 var G = null;
 var lastErr = '';
 var witchSel = { heal: undefined, poison: undefined };
 var connecting = false;
-var myRole = null;
+
+var BROKER_URL = 'wss://broker.emqx.io:8084/mqtt';
+var TOPIC_PREFIX = 'wolfchinese-v1/room/';
 
 /* ============================================================
    工具
@@ -142,12 +146,27 @@ function $id(x){ return document.getElementById(x) }
 function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c] }) }
 function shuffle(a){ for(var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=a[i]; a[i]=a[j]; a[j]=t } return a }
 
+function getPlayerTag(){
+  var tag = localStorage.getItem('wolf_player_tag');
+  if(!tag){
+    tag = 'p_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    localStorage.setItem('wolf_player_tag', tag);
+  }
+  return tag;
+}
+
+function setNet(on){
+  var el = $id('net');
+  if(!el) return;
+  el.className = 'netstatus ' + (on ? 'on' : 'off');
+  el.innerText = on ? '● 已连接' : '○ 未连接';
+}
+
 /* ============================================================
    房主：创建房间
    ============================================================ */
 function createRoom(){
   var name = ($id('nameIpt') && $id('nameIpt').value.trim()) || '玩家';
-  myName = name;
   localStorage.setItem('wolf_name', name);
   lastErr = '';
   render();
@@ -156,64 +175,53 @@ function createRoom(){
 
 function connectAsHost(name){
   var code = String(Math.floor(1000 + Math.random() * 9000));
-  hostPeerId = 'wolfgame-' + code;
-  peer = new Peer(hostPeerId, { debug: 1 });
+  roomTopic = TOPIC_PREFIX + code;
+  myTag = getPlayerTag();
+  isHost = true;
 
-  var opened = false;
-  var timeout = setTimeout(function(){
-    if(!opened){ lastErr = '连接信令服务器超时，请检查网络'; render(); }
-  }, 15000);
-
-  peer.on('open', function(id){
-    opened = true;
-    clearTimeout(timeout);
-    isHost = true;
-    host = createHostState(code, name);
-    G = buildHostViewFor(host.players.get(1));
-    render();
+  var clientId = 'wolf_host_' + code + '_' + Math.random().toString(36).slice(2, 8);
+  mqttClient = mqtt.connect(BROKER_URL, {
+    clientId: clientId,
+    clean: true,
+    reconnectPeriod: 2000,
+    connectTimeout: 15000,
+    keepalive: 30,
   });
 
-  peer.on('error', function(err){
-    clearTimeout(timeout);
-    console.error('Peer 错误:', err);
-    if(err.type === 'unavailable-id'){
-      peer.destroy();
-      setTimeout(function(){ connectAsHost(name) }, 200);
-      return;
-    }
-    lastErr = '创建失败: ' + (err.type || err.message || '未知错误');
-    render();
-  });
+  var ready = false;
+  var t = setTimeout(function(){
+    if(!ready){ lastErr = '连接服务器超时，请检查网络'; render(); }
+  }, 20000);
 
-  peer.on('connection', function(conn){
-    conn.on('open', function(){
-      connections.set(conn.peer, conn);
-    });
-    conn.on('data', function(data){ handleClientMessage(conn, data) });
-    conn.on('close', function(){
-      connections.delete(conn.peer);
-      var removedPlayer = null;
-      for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
-        if(p.value.peerId === conn.peer){ removedPlayer = p.value; break; }
+  mqttClient.on('connect', function(){
+    ready = true;
+    clearTimeout(t);
+    setNet(true);
+    mqttClient.subscribe(roomTopic, { qos: 1 }, function(err){
+      if(err){ lastErr = '订阅失败'; render(); return; }
+      if(!host){
+        host = createHostState(code, name);
+        host.players.get(1).tag = myTag;
       }
-      if(removedPlayer){
-        host.players.delete(removedPlayer.id);
-        if(host.phase === 'vote' && host.votes[removedPlayer.id] !== undefined) delete host.votes[removedPlayer.id];
-        if(host.phase === 'sheriffVote' && host.sheriffVotes[removedPlayer.id] !== undefined) delete host.sheriffVotes[removedPlayer.id];
-        if(host.phase !== 'lobby' && host.phase !== 'over'){
-          if(checkWin()){
-            host.phase = 'over';
-            host.allRoles = [];
-            for(var it2 = host.players.values(), p2 = it2.next(); !p2.done; p2 = it2.next()){
-              host.allRoles.push({ id:p2.value.id, role:p2.value.role, alive:p2.value.alive });
-            }
-          }
-        }
-        broadcastHostState();
-      }
+      G = buildHostViewFor(host.players.get(1));
+      render();
     });
-    conn.on('error', function(){});
   });
+
+  mqttClient.on('message', function(topic, payload){
+    if(topic !== roomTopic) return;
+    var msg;
+    try { msg = JSON.parse(payload.toString()); } catch(e){ return; }
+    if(msg.to !== 'host') return;
+    handleClientMessage(msg);
+  });
+
+  mqttClient.on('error', function(err){
+    console.error('MQTT 错误', err);
+    setNet(false);
+  });
+  mqttClient.on('close', function(){ setNet(false); });
+  mqttClient.on('reconnect', function(){ setNet(false); });
 }
 
 function createHostState(code, hostName){
@@ -225,54 +233,92 @@ function createHostState(code, hostName){
     sheriffId: null, sheriffCandidates: [], sheriffVotes: {}, sheriffReelection: false
   };
   s.players.set(1, {
-    id: 1, name: hostName, peerId: peer.id, role: null,
+    id: 1, name: hostName, tag: '', role: null,
     alive: true, connected: true, seerChecks: []
   });
   return s;
 }
 
-function handleClientMessage(conn, data){
+function handleClientMessage(msg){
   if(!host) return;
 
-  if(data.type === 'join'){
-    if(host.phase !== 'lobby'){
-      conn.send({ type: 'error', msg: '游戏已开始，无法加入' });
+  if(msg.type === 'join'){
+    var existingPlayer = null;
+    for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+      if(p.value.tag === msg.from){ existingPlayer = p.value; break; }
+    }
+
+    if(host.phase !== 'lobby' && !existingPlayer){
+      publishTo(msg.from, { type: 'error', msg: '游戏已开始，无法加入' });
       return;
     }
+
+    if(existingPlayer){
+      existingPlayer.name = (msg.name || existingPlayer.name).slice(0, 8);
+      existingPlayer.connected = true;
+      publishTo(msg.from, { type: 'joined', playerId: existingPlayer.id });
+      broadcastHostState();
+      return;
+    }
+
     if(host.players.size >= 12){
-      conn.send({ type: 'error', msg: '房间已满' });
+      publishTo(msg.from, { type: 'error', msg: '房间已满' });
       return;
     }
     var id = host.nextId++;
     host.players.set(id, {
-      id: id, name: (data.name || '玩家').slice(0, 8), peerId: conn.peer,
+      id: id, name: (msg.name || '玩家').slice(0, 8), tag: msg.from,
       role: null, alive: true, connected: true, seerChecks: []
     });
-    conn.send({ type: 'joined', playerId: id });
+    publishTo(msg.from, { type: 'joined', playerId: id });
     broadcastHostState();
   }
-  else if(data.type === 'action'){
+  else if(msg.type === 'leave'){
+    var found = null;
+    for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+      if(p.value.tag === msg.from){ found = p.value; break; }
+    }
+    if(found && found.id !== 1){
+      host.players.delete(found.id);
+      if(host.phase === 'vote' && host.votes[found.id] !== undefined) delete host.votes[found.id];
+      if(host.phase === 'sheriffVote' && host.sheriffVotes[found.id] !== undefined) delete host.sheriffVotes[found.id];
+      if(host.phase !== 'lobby' && host.phase !== 'over'){
+        if(checkWin()){
+          host.phase = 'over';
+          host.allRoles = [];
+          for(var it2 = host.players.values(), p2 = it2.next(); !p2.done; p2 = it2.next()){
+            host.allRoles.push({ id:p2.value.id, role:p2.value.role, alive:p2.value.alive });
+          }
+        }
+      }
+      broadcastHostState();
+    }
+  }
+  else if(msg.type === 'action'){
     var player = null;
     for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
-      if(p.value.peerId === conn.peer){ player = p.value; break; }
+      if(p.value.tag === msg.from){ player = p.value; break; }
     }
     if(!player) return;
-    hostHandleAction(player, data);
+    hostHandleAction(player, msg);
   }
 }
 
+function publishTo(tag, obj){
+  if(!mqttClient || !roomTopic) return;
+  var m = Object.assign({}, obj, { to: tag });
+  mqttClient.publish(roomTopic, JSON.stringify(m), { qos: 1 });
+}
+
 function broadcastHostState(){
-  if(!host) return;
-  G = buildHostViewFor(host.players.get(1));
-  render();
+  if(!host || !mqttClient) return;
   for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
     var pl = p.value;
     if(pl.id === 1) continue;
-    var c = connections.get(pl.peerId);
-    if(c && c.open){
-      c.send({ type: 'update', state: buildHostViewFor(pl) });
-    }
+    publishTo(pl.tag, { type: 'update', state: buildHostViewFor(pl) });
   }
+  G = buildHostViewFor(host.players.get(1));
+  render();
 }
 
 function buildHostViewFor(player){
@@ -303,7 +349,6 @@ function joinRoom(){
   var name = ($id('nameIpt') && $id('nameIpt').value.trim()) || '玩家';
   var code = ($id('codeIpt') && $id('codeIpt').value.trim()) || '';
   if(!/^\d{4}$/.test(code)){ lastErr = '请输入 4 位房间号'; render(); return; }
-  myName = name;
   localStorage.setItem('wolf_name', name);
   lastErr = '';
   render();
@@ -312,63 +357,88 @@ function joinRoom(){
 
 function connectAsClient(code, name){
   isHost = false;
-  peer = new Peer({ debug: 1 });
+  roomTopic = TOPIC_PREFIX + code;
+  myTag = getPlayerTag();
 
-  var opened = false;
-  var timeout = setTimeout(function(){
-    if(!opened){ lastErr = '信令服务器连接超时'; render(); }
-  }, 15000);
-
-  peer.on('open', function(){
-    opened = true;
-    clearTimeout(timeout);
-    hostConn = peer.connect('wolfgame-' + code, { reliable: true });
-    var connTimeout = setTimeout(function(){
-      if(hostConn && !hostConn.open){
-        lastErr = '找不到房间 ' + code + '，请确认房主已创建';
-        render();
-      }
-    }, 12000);
-
-    hostConn.on('open', function(){
-      clearTimeout(connTimeout);
-      hostConn.send({ type: 'join', name: name });
-    });
-    hostConn.on('data', function(data){
-      if(data.type === 'update'){
-        G = data.state;
-        if(!G.prompt || G.prompt.kind !== 'witch') witchSel = { heal: undefined, poison: undefined };
-        render();
-      } else if(data.type === 'error'){
-        lastErr = data.msg;
-        render();
-      }
-    });
-    hostConn.on('close', function(){
-      lastErr = '与房主断开连接';
-      G = null;
-      render();
-    });
-    hostConn.on('error', function(err){
-      lastErr = '连接出错: ' + (err.type || err.message);
-      render();
-    });
-  });
-
-  peer.on('error', function(err){
-    clearTimeout(timeout);
-    console.error(err);
-    if(err.type === 'peer-unavailable'){
-      lastErr = '房间不存在，请检查房间号';
-    } else {
-      lastErr = '连接失败: ' + (err.type || err.message);
+  var clientId = 'wolf_c_' + myTag.slice(0, 10) + '_' + Math.random().toString(36).slice(2, 6);
+  mqttClient = mqtt.connect(BROKER_URL, {
+    clientId: clientId,
+    clean: true,
+    reconnectPeriod: 2000,
+    connectTimeout: 15000,
+    keepalive: 30,
+    will: {
+      topic: roomTopic,
+      payload: JSON.stringify({ to: 'host', from: myTag, type: 'leave' }),
+      qos: 1,
+      retain: false
     }
-    render();
   });
+
+  var joined = false;
+  var retryTimer = null;
+  var tries = 0;
+
+  mqttClient.on('connect', function(){
+    setNet(true);
+    mqttClient.subscribe(roomTopic, { qos: 1 }, function(err){
+      if(err){ lastErr = '订阅失败'; render(); return; }
+      // 发送加入请求
+      tries++;
+      mqttClient.publish(roomTopic, JSON.stringify({
+        to: 'host', from: myTag, type: 'join', name: name
+      }), { qos: 1 });
+
+      // 设置重试
+      if(!retryTimer){
+        retryTimer = setInterval(function(){
+          if(joined){ clearInterval(retryTimer); retryTimer = null; return; }
+          tries++;
+          if(tries > 6){
+            clearInterval(retryTimer); retryTimer = null;
+            lastErr = '找不到房间 ' + code + '，请确认房主已创建';
+            G = null;
+            render();
+            return;
+          }
+          mqttClient.publish(roomTopic, JSON.stringify({
+            to: 'host', from: myTag, type: 'join', name: name
+          }), { qos: 1 });
+        }, 3000);
+      }
+    });
+  });
+
+  mqttClient.on('message', function(topic, payload){
+    if(topic !== roomTopic) return;
+    var msg;
+    try { msg = JSON.parse(payload.toString()); } catch(e){ return; }
+    if(msg.to !== myTag) return;
+
+    if(msg.type === 'update'){
+      joined = true;
+      if(retryTimer){ clearInterval(retryTimer); retryTimer = null; }
+      G = msg.state;
+      if(!G.prompt || G.prompt.kind !== 'witch') witchSel = { heal: undefined, poison: undefined };
+      render();
+    } else if(msg.type === 'error'){
+      joined = true;
+      if(retryTimer){ clearInterval(retryTimer); retryTimer = null; }
+      lastErr = msg.msg;
+      render();
+    }
+  });
+
+  mqttClient.on('error', function(err){
+    console.error('MQTT 错误', err);
+    setNet(false);
+  });
+  mqttClient.on('close', function(){ setNet(false); });
+  mqttClient.on('reconnect', function(){ setNet(false); });
 }
 
 /* ============================================================
-   游戏逻辑（房主侧运行）
+   游戏逻辑（房主侧运行，与之前相同）
    ============================================================ */
 function buildPromptFor(player){
   if(host.phase === 'hunter' && player.id === host.hunterId){
@@ -479,7 +549,6 @@ function hostHandleAction(player, msg){
     var idx = host.sheriffCandidates.indexOf(player.id);
     if(up && idx === -1) host.sheriffCandidates.push(player.id);
     else if(!up && idx !== -1) host.sheriffCandidates.splice(idx, 1);
-    // 检查是否所有人已表态，简化处理：房主点继续
     broadcastHostState();
     return;
   }
@@ -515,7 +584,7 @@ function hostHandleAction(player, msg){
   if(host.phase === 'hunter' && player.id === host.hunterId){
     if(kind === 'hunter'){
       if(target != null){ var t = host.players.get(target); if(t) t.alive = false; }
-      if(host.sheriffId && !host.players.get(host.sheriffId).alive){ host.sheriffId = null; }
+      if(host.sheriffId && !host.players.get(host.sheriffId).alive){ host.sheriffId = null; host.sheriffReelection = true; }
       if(checkWin()){
         host.phase = 'over';
         host.allRoles = [];
@@ -555,7 +624,7 @@ function resolveNight(){
   deaths.forEach(function(d){ var p = host.players.get(d.id); if(p) p.alive = false; });
   host.lastGuard = host.night.guardTarget;
   host.deaths = deaths;
-  
+
   var poisoned = {};
   deaths.forEach(function(d){ if(d.cause === 'poison') poisoned[d.id] = true });
   var hunter = null;
@@ -566,7 +635,8 @@ function resolveNight(){
   host.hunterId = hunter;
   host.hunterAfter = 'discuss';
 
-  // 判断是否触发警长竞选
+  if(host.sheriffId && !host.players.get(host.sheriffId).alive){ host.sheriffId = null; host.sheriffReelection = true; }
+
   if(host.day === 1 || host.sheriffReelection){
     host.phase = 'sheriffApply';
     host.sheriffCandidates = [];
@@ -603,7 +673,7 @@ function applySheriffVote(){
     else if(n === max) top.push(Number(k));
   }
   if(top.length === 1){ host.sheriffId = top[0]; }
-  else { host.sheriffId = null; } // 平票警徽流失
+  else { host.sheriffId = null; }
   host.phase = 'sheriffResult';
   broadcastHostState();
 }
@@ -612,7 +682,7 @@ function applyVote(){
   var counts = {};
   for(var k in host.votes){
     var t = host.votes[k];
-    var weight = (Number(k) === host.sheriffId) ? 1.5 : 1;
+    var weight = (Number(k) === host.sheriffId) ? 2 : 1;
     counts[t] = (counts[t] || 0) + weight;
   }
   var max = 0, top = [];
@@ -650,7 +720,7 @@ function hostContinue(){
     host.phase = 'discuss'; broadcastHostState(); return;
   }
   if(host.phase === 'sheriffApply'){
-    if(host.sheriffCandidates.length === 0){ 
+    if(host.sheriffCandidates.length === 0){
       host.phase = 'discuss'; broadcastHostState(); return;
     }
     host.phase = 'sheriffVote'; host.sheriffVotes = {};
@@ -711,7 +781,12 @@ function sendAction(kind, target, data){
     var me = host.players.get(1);
     hostHandleAction(me, { kind: kind, target: target, data: data });
   } else {
-    if(hostConn && hostConn.open){ hostConn.send({ type: 'action', kind: kind, target: target, data: data }); }
+    if(mqttClient && mqttClient.connected && roomTopic){
+      mqttClient.publish(roomTopic, JSON.stringify({
+        to: 'host', from: myTag, type: 'action',
+        kind: kind, target: target, data: data
+      }), { qos: 1 });
+    }
   }
 }
 
@@ -753,7 +828,7 @@ function viewEntry(){
   var savedName = localStorage.getItem('wolf_name') || '';
   var err = lastErr ? '<div class="err">' + esc(lastErr) + '</div>' : '';
   return '<div class="title">狼 人 杀</div>' +
-    '<div class="subtitle">手机联机 · 无需服务器</div>' +
+    '<div class="subtitle">手机联机 · MQTT 稳定版</div>' +
     '<div class="card"><div class="label">你的昵称</div>' +
     '<input class="ipt" id="nameIpt" maxlength="8" placeholder="输入昵称" value="' + esc(savedName) + '"></div>' +
     '<button class="primary big" onclick="createRoom()">创 建 房 间</button>' +
@@ -763,9 +838,9 @@ function viewEntry(){
     '<button class="ghost" onclick="joinRoom()">加 入 房 间</button>' + err +
     '<p class="muted" style="margin-top:26px;font-size:12.5px;line-height:1.9">' +
     '· 房主创建后，把 4 位房间号告诉朋友<br>' +
-    '· 朋友在同一个页面输入房间号加入<br>' +
+    '· 朋友在同一页面输入房间号加入<br>' +
     '· 至少 6 人（最多 12 人）才能开始游戏<br>' +
-    '· 同一 WiFi 或手机热点下连接最稳</p>';
+    '· 消息走公共 MQTT 服务器，跨网络稳定性更好</p>';
 }
 
 function viewLobby(){
@@ -903,7 +978,7 @@ function viewSheriffApply(){
   var me = G.you;
   if(!me.alive) return deadBanner();
   var isUp = G.sheriffCandidates && G.sheriffCandidates.indexOf(me.id) !== -1;
-  var btn = isUp 
+  var btn = isUp
     ? '<button class="ghost" onclick="act(\'sheriffApply\', null, {up:false})">退 出 竞 选</button>'
     : '<button class="primary big" onclick="act(\'sheriffApply\', null, {up:true})">上 警 竞 选</button>';
   var list = (G.sheriffCandidates || []).map(function(id){ return id + '号'; }).join('、');
@@ -941,7 +1016,7 @@ function viewSheriffResult(){
   return '<div class="panel center">' + topBadge() +
     '<div class="phasehead">🏅 警长竞选结果</div>' +
     '<div class="bigmsg" style="margin:20px 0;font-size:22px;">' + sheriffName + '</div>' +
-    (G.sheriffId ? '<p class="muted">当选警长，投票时拥有 1.5 票权</p>' : '<p class="muted">平票，警徽流失</p>') +
+    (G.sheriffId ? '<p class="muted">当选警长，投票时拥有 2 票权</p>' : '<p class="muted">平票，警徽流失</p>') +
     (me.isHost ? '<button class="primary big" onclick="doContinue()">继 续</button>' : '<p class="muted">等待房主继续…</p>') +
     '</div>';
 }
@@ -1044,7 +1119,11 @@ function viewOver(){
     '<div class="playerlist">' + rows + '</div>' + btn + '</div>';
 }
 
-(function init(){render(); connect().catch(function(){})})();
+/* ============================================================
+   启动
+   ============================================================ */
+render();
+setNet(false);
 </script>
 <script>
 if ('serviceWorker' in navigator) {
