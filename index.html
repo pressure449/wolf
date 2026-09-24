@@ -106,7 +106,7 @@ button:disabled{opacity:.4;cursor:not-allowed}
 <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <script>
 /* ============================================================
-   全局状态
+   角色配置（狼人最多 2 个）
    ============================================================ */
 var ROLE_INFO = {
   wolf:     { name:'狼人',   team:'wolf', icon:'🐺', desc:'每晚与同伴共同击杀一名玩家。' },
@@ -117,15 +117,18 @@ var ROLE_INFO = {
   villager: { name:'村民',   team:'good', icon:'👤', desc:'没有技能，凭借推理和投票找出隐藏的狼人。' }
 };
 var ROLE_LIST = {
-  6:  ['wolf','wolf','seer','witch','villager','villager'],
-  7:  ['wolf','wolf','seer','witch','hunter','villager','villager'],
-  8:  ['wolf','wolf','wolf','seer','witch','hunter','villager','villager'],
-  9:  ['wolf','wolf','wolf','seer','witch','hunter','villager','villager','villager'],
-  10: ['wolf','wolf','wolf','seer','witch','hunter','guard','villager','villager','villager'],
-  11: ['wolf','wolf','wolf','wolf','seer','witch','hunter','guard','villager','villager','villager'],
-  12: ['wolf','wolf','wolf','wolf','seer','witch','hunter','guard','villager','villager','villager','villager']
+  6:  ['wolf','seer','witch','villager','villager','villager'],
+  7:  ['wolf','seer','witch','hunter','villager','villager','villager'],
+  8:  ['wolf','wolf','seer','witch','hunter','villager','villager','villager'],
+  9:  ['wolf','wolf','seer','witch','hunter','guard','villager','villager','villager'],
+  10: ['wolf','wolf','seer','witch','hunter','guard','villager','villager','villager','villager'],
+  11: ['wolf','wolf','seer','witch','hunter','guard','villager','villager','villager','villager','villager'],
+  12: ['wolf','wolf','seer','witch','hunter','guard','villager','villager','villager','villager','villager','villager']
 };
 
+/* ============================================================
+   全局状态
+   ============================================================ */
 var mqttClient = null;
 var roomTopic = null;
 var myTag = '';
@@ -134,7 +137,6 @@ var host = null;
 var G = null;
 var lastErr = '';
 var witchSel = { heal: undefined, poison: undefined };
-var connecting = false;
 
 var BROKER_URL = 'wss://broker.emqx.io:8084/mqtt';
 var TOPIC_PREFIX = 'wolfchinese-v1/room/';
@@ -163,6 +165,69 @@ function setNet(on){
 }
 
 /* ============================================================
+   ID 重排（防止出现 8 号）
+   ============================================================ */
+function reindexPlayers(host){
+  var ids = [];
+  for(var it = host.players.keys(), p = it.next(); !p.done; p = it.next()){
+    ids.push(p.value);
+  }
+  ids.sort(function(a,b){ return a - b });
+
+  var idMap = {};
+  var newPlayers = new Map();
+  var i = 1;
+  ids.forEach(function(oldId){
+    idMap[oldId] = i;
+    var player = host.players.get(oldId);
+    player.id = i;
+    newPlayers.set(i, player);
+    i++;
+  });
+  host.players = newPlayers;
+  host.nextId = i;
+
+  var newVotes = {};
+  for(var k in host.votes){
+    var nk = idMap[Number(k)];
+    var nv = idMap[host.votes[k]];
+    if(nk !== undefined && nv !== undefined) newVotes[nk] = nv;
+  }
+  host.votes = newVotes;
+
+  var newSV = {};
+  for(var k in host.sheriffVotes){
+    var nk = idMap[Number(k)];
+    var nv = idMap[host.sheriffVotes[k]];
+    if(nk !== undefined && nv !== undefined) newSV[nk] = nv;
+  }
+  host.sheriffVotes = newSV;
+
+  host.sheriffCandidates = host.sheriffCandidates.map(function(id){ return idMap[id] }).filter(function(x){ return x !== undefined });
+
+  if(host.sheriffId != null) host.sheriffId = idMap[host.sheriffId];
+  if(host.hunterId != null) host.hunterId = idMap[host.hunterId];
+  if(host.night.wolfTarget != null) host.night.wolfTarget = idMap[host.night.wolfTarget];
+  if(host.night.seerTarget != null) host.night.seerTarget = idMap[host.night.seerTarget];
+  if(host.night.guardTarget != null) host.night.guardTarget = idMap[host.night.guardTarget];
+  if(host.night.poison != null) host.night.poison = idMap[host.night.poison];
+  if(host.lastGuard != null) host.lastGuard = idMap[host.lastGuard];
+
+  host.deaths.forEach(function(d){ d.id = idMap[d.id] });
+
+  if(host.allRoles){
+    host.allRoles.forEach(function(r){ r.id = idMap[r.id] });
+  }
+
+  var newSA = {};
+  for(var k in host.sheriffApplied){
+    var nk = idMap[Number(k)];
+    if(nk !== undefined) newSA[nk] = true;
+  }
+  host.sheriffApplied = newSA;
+}
+
+/* ============================================================
    房主：创建房间
    ============================================================ */
 function createRoom(){
@@ -185,7 +250,7 @@ function connectAsHost(name){
     clean: true,
     reconnectPeriod: 2000,
     connectTimeout: 15000,
-    keepalive: 30,
+    keepalive: 30
   });
 
   var ready = false;
@@ -216,10 +281,7 @@ function connectAsHost(name){
     handleClientMessage(msg);
   });
 
-  mqttClient.on('error', function(err){
-    console.error('MQTT 错误', err);
-    setNet(false);
-  });
+  mqttClient.on('error', function(err){ console.error('MQTT 错误', err); setNet(false); });
   mqttClient.on('close', function(){ setNet(false); });
   mqttClient.on('reconnect', function(){ setNet(false); });
 }
@@ -230,7 +292,7 @@ function createHostState(code, hostName){
     night: {}, lastGuard: null, witchHealUsed: false, witchPoisonUsed: false,
     deaths: [], hunterId: null, hunterAfter: null, votes: {}, voteResult: null,
     winner: null, allRoles: null, players: new Map(),
-    sheriffId: null, sheriffCandidates: [], sheriffVotes: {}, sheriffReelection: false
+    sheriffId: null, sheriffCandidates: [], sheriffVotes: {}, sheriffReelection: false, sheriffApplied: {}
   };
   s.players.set(1, {
     id: 1, name: hostName, tag: '', role: null,
@@ -282,6 +344,7 @@ function handleClientMessage(msg){
       host.players.delete(found.id);
       if(host.phase === 'vote' && host.votes[found.id] !== undefined) delete host.votes[found.id];
       if(host.phase === 'sheriffVote' && host.sheriffVotes[found.id] !== undefined) delete host.sheriffVotes[found.id];
+      reindexPlayers(host);
       if(host.phase !== 'lobby' && host.phase !== 'over'){
         if(checkWin()){
           host.phase = 'over';
@@ -338,6 +401,7 @@ function buildHostViewFor(player){
     deaths: host.deaths, voteResult: host.voteResult, hunterId: host.hunterId,
     winner: host.winner, allRoles: host.allRoles,
     sheriffId: host.sheriffId, sheriffReelection: host.sheriffReelection,
+    sheriffApplied: host.sheriffApplied, sheriffCandidates: host.sheriffCandidates,
     prompt: buildPromptFor(player)
   };
 }
@@ -383,13 +447,11 @@ function connectAsClient(code, name){
     setNet(true);
     mqttClient.subscribe(roomTopic, { qos: 1 }, function(err){
       if(err){ lastErr = '订阅失败'; render(); return; }
-      // 发送加入请求
       tries++;
       mqttClient.publish(roomTopic, JSON.stringify({
         to: 'host', from: myTag, type: 'join', name: name
       }), { qos: 1 });
 
-      // 设置重试
       if(!retryTimer){
         retryTimer = setInterval(function(){
           if(joined){ clearInterval(retryTimer); retryTimer = null; return; }
@@ -429,16 +491,13 @@ function connectAsClient(code, name){
     }
   });
 
-  mqttClient.on('error', function(err){
-    console.error('MQTT 错误', err);
-    setNet(false);
-  });
+  mqttClient.on('error', function(err){ console.error('MQTT 错误', err); setNet(false); });
   mqttClient.on('close', function(){ setNet(false); });
   mqttClient.on('reconnect', function(){ setNet(false); });
 }
 
 /* ============================================================
-   游戏逻辑（房主侧运行，与之前相同）
+   游戏逻辑（房主侧运行）
    ============================================================ */
 function buildPromptFor(player){
   if(host.phase === 'hunter' && player.id === host.hunterId){
@@ -499,6 +558,7 @@ function buildPromptFor(player){
 
   if(host.phase === 'sheriffApply'){
     if(!player.alive) return null;
+    if(host.sheriffApplied && host.sheriffApplied[player.id]) return null;
     return { kind: 'sheriffApply', targets: [] };
   }
 
@@ -545,10 +605,29 @@ function hostHandleAction(player, msg){
   }
 
   if(host.phase === 'sheriffApply' && kind === 'sheriffApply'){
+    if(host.sheriffApplied[player.id]) return;
+    host.sheriffApplied[player.id] = true;
     var up = data && data.up;
     var idx = host.sheriffCandidates.indexOf(player.id);
     if(up && idx === -1) host.sheriffCandidates.push(player.id);
-    else if(!up && idx !== -1) host.sheriffCandidates.splice(idx, 1);
+
+    var allApplied = true;
+    for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+      var pl = p.value;
+      if(pl.alive && !host.sheriffApplied[pl.id]){ allApplied = false; break; }
+    }
+
+    if(allApplied){
+      if(host.sheriffCandidates.length === 0){
+        host.phase = 'discuss';
+      } else if(host.sheriffCandidates.length === 1){
+        host.sheriffId = host.sheriffCandidates[0];
+        host.phase = 'sheriffResult';
+      } else {
+        host.phase = 'sheriffVote';
+        host.sheriffVotes = {};
+      }
+    }
     broadcastHostState();
     return;
   }
@@ -584,7 +663,7 @@ function hostHandleAction(player, msg){
   if(host.phase === 'hunter' && player.id === host.hunterId){
     if(kind === 'hunter'){
       if(target != null){ var t = host.players.get(target); if(t) t.alive = false; }
-      if(host.sheriffId && !host.players.get(host.sheriffId).alive){ host.sheriffId = null; host.sheriffReelection = true; }
+      if(host.sheriffId && host.players.get(host.sheriffId) && !host.players.get(host.sheriffId).alive){ host.sheriffId = null; host.sheriffReelection = true; }
       if(checkWin()){
         host.phase = 'over';
         host.allRoles = [];
@@ -635,12 +714,15 @@ function resolveNight(){
   host.hunterId = hunter;
   host.hunterAfter = 'discuss';
 
-  if(host.sheriffId && !host.players.get(host.sheriffId).alive){ host.sheriffId = null; host.sheriffReelection = true; }
+  if(host.sheriffId && host.players.get(host.sheriffId) && !host.players.get(host.sheriffId).alive){
+    host.sheriffId = null; host.sheriffReelection = true;
+  }
 
   if(host.day === 1 || host.sheriffReelection){
     host.phase = 'sheriffApply';
     host.sheriffCandidates = [];
     host.sheriffVotes = {};
+    host.sheriffApplied = {};
     host.sheriffReelection = false;
   } else {
     host.phase = 'dawn';
@@ -710,7 +792,7 @@ function hostStartGame(){
   host.lastGuard = null; host.witchHealUsed = false; host.witchPoisonUsed = false;
   host.deaths = []; host.hunterId = null; host.hunterAfter = null;
   host.votes = {}; host.voteResult = null; host.winner = null; host.allRoles = null;
-  host.sheriffId = null; host.sheriffCandidates = []; host.sheriffVotes = {}; host.sheriffReelection = false;
+  host.sheriffId = null; host.sheriffCandidates = []; host.sheriffVotes = {}; host.sheriffReelection = false; host.sheriffApplied = {};
   broadcastHostState(); return true;
 }
 
@@ -766,7 +848,7 @@ function restartHost(){
   host.lastGuard = null; host.witchHealUsed = false; host.witchPoisonUsed = false;
   host.deaths = []; host.hunterId = null; host.hunterAfter = null;
   host.votes = {}; host.voteResult = null; host.winner = null; host.allRoles = null;
-  host.sheriffId = null; host.sheriffCandidates = []; host.sheriffVotes = {}; host.sheriffReelection = false;
+  host.sheriffId = null; host.sheriffCandidates = []; host.sheriffVotes = {}; host.sheriffReelection = false; host.sheriffApplied = {};
   for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
     p.value.role = null; p.value.alive = true; p.value.seerChecks = [];
   }
@@ -877,10 +959,14 @@ function topBadge(){
 }
 
 function deadBanner(){
+  var me = G.you;
+  var hostBtn = (me && me.isHost)
+    ? '<button class="primary big" style="margin-top:20px;max-width:220px" onclick="doContinue()">房主强制继续</button>'
+    : '';
   return '<div class="center-screen">' + topBadge() +
     '<div style="font-size:56px">💀</div>' +
     '<div class="bigmsg">你已出局</div>' +
-    '<p class="muted">观战中，请勿透露他人身份</p></div>';
+    '<p class="muted">观战中，请勿透露他人身份</p>' + hostBtn + '</div>';
 }
 
 function viewNight(){
@@ -977,19 +1063,27 @@ function viewSeerResult(p){
 function viewSheriffApply(){
   var me = G.you;
   if(!me.alive) return deadBanner();
-  var isUp = G.sheriffCandidates && G.sheriffCandidates.indexOf(me.id) !== -1;
-  var btn = isUp
-    ? '<button class="ghost" onclick="act(\'sheriffApply\', null, {up:false})">退 出 竞 选</button>'
-    : '<button class="primary big" onclick="act(\'sheriffApply\', null, {up:true})">上 警 竞 选</button>';
-  var list = (G.sheriffCandidates || []).map(function(id){ return id + '号'; }).join('、');
+  var myChoice = G.sheriffApplied && G.sheriffApplied[me.id];
+  var isUp = (G.sheriffCandidates || []).indexOf(me.id) !== -1;
+  var list = (G.sheriffCandidates || []).map(function(id){ return id + '号'; }).join('、') || '暂无';
+
+  if(myChoice){
+    return '<div class="center-screen">' + topBadge() +
+      '<div style="font-size:56px">🏅</div>' +
+      '<div class="bigmsg">你已' + (isUp ? '上警' : '不上警') + '</div>' +
+      '<p class="muted">当前上警名单：' + list + '</p>' +
+      '<p class="muted">等待其他玩家表态…</p></div>';
+  }
+
   return '<div class="panel center">' + topBadge() +
     '<div class="phasehead">🏅 警长竞选</div>' +
     '<div class="bigmsg">第 ' + G.day + ' 天 · 上警环节</div>' +
-    '<p class="muted">想要竞选警长的玩家请点击下方按钮</p>' +
-    (list ? '<p class="hint">已上警：' + list + '</p>' : '<p class="muted">暂无玩家上警</p>') +
-    '<div style="height:10px"></div>' + btn +
-    '<p class="muted" style="font-size:12px;margin-top:16px">* 所有人表态后，由房主点击下方按钮进入投票</p>' +
-    (me.isHost ? '<button class="primary big" onclick="doContinue()" style="margin-top:10px">确 定 上 警 名 单</button>' : '<p class="muted">等待房主确认上警名单…</p>') +
+    '<p class="muted">想当警长点【上警】，不想当点【不上警】</p>' +
+    '<p class="hint">当前上警名单：' + list + '</p>' +
+    '<div style="height:10px"></div>' +
+    '<button class="primary big" onclick="act(\'sheriffApply\', null, {up:true})">上 警 竞 选</button>' +
+    '<button class="ghost" style="margin-top:10px" onclick="act(\'sheriffApply\', null, {up:false})">不 上 警</button>' +
+    '<p class="muted" style="font-size:12px;margin-top:16px">* 所有人表态后自动进入下一步</p>' +
     '</div>';
 }
 
@@ -1001,7 +1095,7 @@ function viewSheriffVote(){
     var btns = p.targets.map(function(id){ return '<button class="pcard" onclick="act(\'sheriffVote\',' + id + ')">' + id + '号</button>' }).join('');
     return '<div class="panel">' + topBadge() +
       '<div class="phasehead">🗳️ 警长竞选投票</div>' +
-      '<p class="muted">请选择你支持的警长候选人</p>' +
+      '<p class="muted">请选择你支持的警长候选人（可以投给自己）</p>' +
       '<div class="grid">' + btns + '</div></div>';
   }
   return '<div class="center-screen">' + topBadge() +
