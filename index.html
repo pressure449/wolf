@@ -93,14 +93,12 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .resverdict{font-size:24px;font-weight:800;letter-spacing:6px;margin-top:12px}
 .seerresult.bad .resverdict{color:#e06c6c}
 .seerresult.good .resverdict{color:#6cc98c}
-.code-box{background:#13131f;border:2px solid #3a3a5c;border-radius:14px;padding:20px;text-align:center;margin:14px 0}
-.code-box .lbl{font-size:12px;color:#7c7c96;letter-spacing:2px}
-.code-box .num{font-size:64px;font-weight:800;color:#d4af37;letter-spacing:14px;margin:8px 0 0;font-family:Consolas,monospace;text-indent:14px}
-.share-tip{text-align:center;font-size:12.5px;color:#6a6a84;line-height:1.8;margin-top:10px}
+.sheriff-tag{color:#d4af37;font-size:12px;margin-left:4px}
 </style>
 </head>
 <body>
 <div id="app"></div>
+
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
 /* ============================================================
@@ -152,7 +150,7 @@ function createRoom(){
   myName = name;
   localStorage.setItem('wolf_name', name);
   lastErr = '';
-  render(); // 显示加载中
+  render();
   connectAsHost(name);
 }
 
@@ -193,71 +191,38 @@ function connectAsHost(name){
     });
     conn.on('data', function(data){ handleClientMessage(conn, data) });
     conn.on('close', function(){
-  connections.delete(conn.peer);
-  var removedPlayer = null;
-  for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
-    if(p.value.peerId === conn.peer){
-      removedPlayer = p.value;
-      break;
-    }
-  }
-  if(removedPlayer){
-    // 1. 直接从玩家列表里剔除
-    host.players.delete(removedPlayer.id);
-
-    // 2. 如果正在投票，把它的票也一起清掉
-    if(host.phase === 'vote' && host.votes[removedPlayer.id] !== undefined){
-      delete host.votes[removedPlayer.id];
-    }
-
-    // 3. 如果游戏正在进行中，判断是否影响胜负
-    if(host.phase !== 'lobby' && host.phase !== 'over'){
-      if(checkWin()){
-        host.phase = 'over';
-        host.allRoles = [];
-        for(var it2 = host.players.values(), p2 = it2.next(); !p2.done; p2 = it2.next()){
-          host.allRoles.push({ id:p2.value.id, role:p2.value.role, alive:p2.value.alive });
-        }
-      } else if (host.phase === 'vote') {
-        // 如果刚好有人离开导致所有人都已投完票，直接结算
-        var allVoted = true;
-        for(var it3 = host.players.values(), p3 = it3.next(); !p3.done; p3 = it3.next()){
-          var pl = p3.value;
-          if(pl.alive && host.votes[pl.id] == null){ allVoted = false; break; }
-        }
-        if(allVoted && host.alivePlayers().length > 0){
-          applyVote();
-        }
+      connections.delete(conn.peer);
+      var removedPlayer = null;
+      for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+        if(p.value.peerId === conn.peer){ removedPlayer = p.value; break; }
       }
-    }
-
-    broadcastHostState();
-  }
-});
+      if(removedPlayer){
+        host.players.delete(removedPlayer.id);
+        if(host.phase === 'vote' && host.votes[removedPlayer.id] !== undefined) delete host.votes[removedPlayer.id];
+        if(host.phase === 'sheriffVote' && host.sheriffVotes[removedPlayer.id] !== undefined) delete host.sheriffVotes[removedPlayer.id];
+        if(host.phase !== 'lobby' && host.phase !== 'over'){
+          if(checkWin()){
+            host.phase = 'over';
+            host.allRoles = [];
+            for(var it2 = host.players.values(), p2 = it2.next(); !p2.done; p2 = it2.next()){
+              host.allRoles.push({ id:p2.value.id, role:p2.value.role, alive:p2.value.alive });
+            }
+          }
+        }
+        broadcastHostState();
+      }
+    });
     conn.on('error', function(){});
   });
 }
 
 function createHostState(code, hostName){
   var s = {
-    code: code,
-    hostId: 1,
-    nextId: 2,
-    phase: 'lobby',
-    day: 0,
-    nightStep: 0,
-    night: {},
-    lastGuard: null,
-    witchHealUsed: false,
-    witchPoisonUsed: false,
-    deaths: [],
-    hunterId: null,
-    hunterAfter: null,
-    votes: {},
-    voteResult: null,
-    winner: null,
-    allRoles: null,
-    players: new Map()
+    code: code, hostId: 1, nextId: 2, phase: 'lobby', day: 0, nightStep: 0,
+    night: {}, lastGuard: null, witchHealUsed: false, witchPoisonUsed: false,
+    deaths: [], hunterId: null, hunterAfter: null, votes: {}, voteResult: null,
+    winner: null, allRoles: null, players: new Map(),
+    sheriffId: null, sheriffCandidates: [], sheriffVotes: {}, sheriffReelection: false
   };
   s.players.set(1, {
     id: 1, name: hostName, peerId: peer.id, role: null,
@@ -280,13 +245,8 @@ function handleClientMessage(conn, data){
     }
     var id = host.nextId++;
     host.players.set(id, {
-      id: id,
-      name: (data.name || '玩家').slice(0, 8),
-      peerId: conn.peer,
-      role: null,
-      alive: true,
-      connected: true,
-      seerChecks: []
+      id: id, name: (data.name || '玩家').slice(0, 8), peerId: conn.peer,
+      role: null, alive: true, connected: true, seerChecks: []
     });
     conn.send({ type: 'joined', playerId: id });
     broadcastHostState();
@@ -319,28 +279,19 @@ function buildHostViewFor(player){
   var playersArr = [];
   for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
     var pl = p.value;
-    playersArr.push({ id: pl.id, name: pl.name, connected: pl.connected, alive: pl.alive });
+    playersArr.push({ id: pl.id, name: pl.name, connected: pl.connected, alive: pl.alive, isSheriff: pl.id === host.sheriffId });
   }
   return {
-    code: host.code,
-    hostId: host.hostId,
-    players: playersArr,
+    code: host.code, hostId: host.hostId, players: playersArr,
     you: {
-      id: player.id,
-      name: player.name,
-      isHost: player.id === host.hostId,
-      alive: player.alive,
-      role: player.role,
+      id: player.id, name: player.name, isHost: player.id === host.hostId,
+      alive: player.alive, role: player.role,
       seerChecks: player.role === 'seer' ? player.seerChecks : undefined
     },
-    phase: host.phase,
-    day: host.day,
-    nightStep: host.nightStep,
-    deaths: host.deaths,
-    voteResult: host.voteResult,
-    hunterId: host.hunterId,
-    winner: host.winner,
-    allRoles: host.allRoles,
+    phase: host.phase, day: host.day, nightStep: host.nightStep,
+    deaths: host.deaths, voteResult: host.voteResult, hunterId: host.hunterId,
+    winner: host.winner, allRoles: host.allRoles,
+    sheriffId: host.sheriffId, sheriffReelection: host.sheriffReelection,
     prompt: buildPromptFor(player)
   };
 }
@@ -384,9 +335,7 @@ function connectAsClient(code, name){
       hostConn.send({ type: 'join', name: name });
     });
     hostConn.on('data', function(data){
-      if(data.type === 'joined'){
-        // 记录自己的 playerId（可选）
-      } else if(data.type === 'update'){
+      if(data.type === 'update'){
         G = data.state;
         if(!G.prompt || G.prompt.kind !== 'witch') witchSel = { heal: undefined, poison: undefined };
         render();
@@ -478,6 +427,17 @@ function buildPromptFor(player){
     return null;
   }
 
+  if(host.phase === 'sheriffApply'){
+    if(!player.alive) return null;
+    return { kind: 'sheriffApply', targets: [] };
+  }
+
+  if(host.phase === 'sheriffVote'){
+    if(!player.alive) return null;
+    if(host.sheriffVotes[player.id] != null) return null;
+    return { kind: 'sheriffVote', targets: host.sheriffCandidates };
+  }
+
   if(host.phase === 'vote' && player.alive){
     if(host.votes[player.id] != null) return null;
     var vts = [];
@@ -494,32 +454,45 @@ function hostHandleAction(player, msg){
 
   if(host.phase === 'night'){
     if(kind === 'guard' && player.role === 'guard' && host.nightStep === 0){
-      host.night.guardTarget = target;
-      advanceNight();
+      host.night.guardTarget = target; advanceNight();
     } else if(kind === 'wolf' && player.role === 'wolf' && host.nightStep === 1){
-      if(host.night.wolfTarget === undefined){
-        host.night.wolfTarget = target;
-        advanceNight();
-      }
+      if(host.night.wolfTarget === undefined){ host.night.wolfTarget = target; advanceNight(); }
     } else if(kind === 'witch' && player.role === 'witch' && host.nightStep === 2){
       if(data && data.heal && !host.witchHealUsed){ host.night.heal = true; host.witchHealUsed = true; }
       if(data && data.poison && !host.witchPoisonUsed){ host.night.poison = data.poison; host.witchPoisonUsed = true; }
-      host.night.witchDone = true;
-      advanceNight();
+      host.night.witchDone = true; advanceNight();
     } else if(kind === 'seer' && player.role === 'seer' && host.nightStep === 3){
-      if(target != null){
-        host.night.seerTarget = target;
-        broadcastHostState();
-      } else {
-        host.night.seerDone = true;
-        advanceNight();
-      }
+      if(target != null){ host.night.seerTarget = target; broadcastHostState(); }
+      else { host.night.seerDone = true; advanceNight(); }
     } else if(kind === 'forceSkip' && player.id === host.hostId){
       if(host.nightStep === 0){ host.night.guardTarget = null; host.nightStep = 1; }
       else if(host.nightStep === 1){ host.night.wolfTarget = null; host.nightStep = 2; }
       else if(host.nightStep === 2){ host.night.witchDone = true; host.nightStep = 3; }
       else if(host.nightStep === 3){ host.night.seerDone = true; host.nightStep = 4; }
-      if(host.nightStep >= 4) resolveNight();
+      if(host.nightStep >= 4) resolveNight(); else broadcastHostState();
+    }
+    return;
+  }
+
+  if(host.phase === 'sheriffApply' && kind === 'sheriffApply'){
+    var up = data && data.up;
+    var idx = host.sheriffCandidates.indexOf(player.id);
+    if(up && idx === -1) host.sheriffCandidates.push(player.id);
+    else if(!up && idx !== -1) host.sheriffCandidates.splice(idx, 1);
+    // 检查是否所有人已表态，简化处理：房主点继续
+    broadcastHostState();
+    return;
+  }
+
+  if(host.phase === 'sheriffVote' && kind === 'sheriffVote'){
+    if(player.alive && host.sheriffVotes[player.id] == null){
+      host.sheriffVotes[player.id] = target;
+      var allVoted = true;
+      for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+        var pl = p.value;
+        if(pl.alive && host.sheriffVotes[pl.id] == null){ allVoted = false; break; }
+      }
+      if(allVoted) applySheriffVote();
       else broadcastHostState();
     }
     return;
@@ -541,27 +514,20 @@ function hostHandleAction(player, msg){
 
   if(host.phase === 'hunter' && player.id === host.hunterId){
     if(kind === 'hunter'){
-      if(target != null){
-        var t = host.players.get(target);
-        if(t) t.alive = false;
-      }
+      if(target != null){ var t = host.players.get(target); if(t) t.alive = false; }
+      if(host.sheriffId && !host.players.get(host.sheriffId).alive){ host.sheriffId = null; }
       if(checkWin()){
         host.phase = 'over';
         host.allRoles = [];
         for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
           host.allRoles.push({ id:p.value.id, role:p.value.role, alive:p.value.alive });
         }
-        broadcastHostState();
-        return;
+        broadcastHostState(); return;
       }
       if(host.hunterAfter === 'night'){
         host.phase = 'night'; host.day++; host.nightStep = 0; host.night = {};
-        host.deaths = []; host.hunterId = null;
-        broadcastHostState();
-      } else {
-        host.phase = 'discuss';
-        broadcastHostState();
-      }
+        host.deaths = []; host.hunterId = null; broadcastHostState();
+      } else { host.phase = 'discuss'; broadcastHostState(); }
     }
   }
 }
@@ -586,14 +552,10 @@ function resolveNight(){
   if(host.night.poison != null && !deaths.some(function(d){return d.id === host.night.poison})){
     deaths.push({ id: host.night.poison, cause: 'poison' });
   }
-  deaths.forEach(function(d){
-    var p = host.players.get(d.id);
-    if(p) p.alive = false;
-  });
+  deaths.forEach(function(d){ var p = host.players.get(d.id); if(p) p.alive = false; });
   host.lastGuard = host.night.guardTarget;
   host.deaths = deaths;
-  host.phase = 'dawn';
-
+  
   var poisoned = {};
   deaths.forEach(function(d){ if(d.cause === 'poison') poisoned[d.id] = true });
   var hunter = null;
@@ -603,30 +565,55 @@ function resolveNight(){
   });
   host.hunterId = hunter;
   host.hunterAfter = 'discuss';
+
+  // 判断是否触发警长竞选
+  if(host.day === 1 || host.sheriffReelection){
+    host.phase = 'sheriffApply';
+    host.sheriffCandidates = [];
+    host.sheriffVotes = {};
+    host.sheriffReelection = false;
+  } else {
+    host.phase = 'dawn';
+  }
   broadcastHostState();
 }
 
 function checkWin(){
   var alive = [], wolves = 0;
   for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
-    if(p.value.alive){
-      alive.push(p.value);
-      if(p.value.role === 'wolf') wolves++;
-    }
+    if(p.value.alive){ alive.push(p.value); if(p.value.role === 'wolf') wolves++; }
   }
   var good = alive.length - wolves;
   if(alive.length === 0){ host.winner = 'wolf'; return true; }
   if(wolves === 0){ host.winner = 'good'; return true; }
   if(wolves >= good){ host.winner = 'wolf'; return true; }
-  host.winner = null;
-  return false;
+  host.winner = null; return false;
+}
+
+function applySheriffVote(){
+  var counts = {};
+  for(var k in host.sheriffVotes){
+    var t = host.sheriffVotes[k];
+    counts[t] = (counts[t] || 0) + 1;
+  }
+  var max = 0, top = [];
+  for(var k in counts){
+    var n = counts[k];
+    if(n > max){ max = n; top = [Number(k)]; }
+    else if(n === max) top.push(Number(k));
+  }
+  if(top.length === 1){ host.sheriffId = top[0]; }
+  else { host.sheriffId = null; } // 平票警徽流失
+  host.phase = 'sheriffResult';
+  broadcastHostState();
 }
 
 function applyVote(){
   var counts = {};
   for(var k in host.votes){
     var t = host.votes[k];
-    counts[t] = (counts[t] || 0) + 1;
+    var weight = (Number(k) === host.sheriffId) ? 1.5 : 1;
+    counts[t] = (counts[t] || 0) + weight;
   }
   var max = 0, top = [];
   for(var k in counts){
@@ -647,19 +634,28 @@ function hostStartGame(){
   for(var it = host.players.keys(), p = it.next(); !p.done; p = it.next()) ids.push(p.value);
   ids.forEach(function(id, i){
     var p = host.players.get(id);
-    p.role = roles[i];
-    p.alive = true;
-    p.seerChecks = [];
+    p.role = roles[i]; p.alive = true; p.seerChecks = [];
   });
   host.phase = 'night'; host.day = 1; host.nightStep = 0; host.night = {};
   host.lastGuard = null; host.witchHealUsed = false; host.witchPoisonUsed = false;
   host.deaths = []; host.hunterId = null; host.hunterAfter = null;
   host.votes = {}; host.voteResult = null; host.winner = null; host.allRoles = null;
-  broadcastHostState();
-  return true;
+  host.sheriffId = null; host.sheriffCandidates = []; host.sheriffVotes = {}; host.sheriffReelection = false;
+  broadcastHostState(); return true;
 }
 
 function hostContinue(){
+  if(host.phase === 'sheriffResult'){
+    if(host.hunterId){ host.phase = 'hunter'; broadcastHostState(); return; }
+    host.phase = 'discuss'; broadcastHostState(); return;
+  }
+  if(host.phase === 'sheriffApply'){
+    if(host.sheriffCandidates.length === 0){ 
+      host.phase = 'discuss'; broadcastHostState(); return;
+    }
+    host.phase = 'sheriffVote'; host.sheriffVotes = {};
+    broadcastHostState(); return;
+  }
   if(host.phase === 'dawn'){
     if(host.hunterId){ host.phase = 'hunter'; broadcastHostState(); return; }
     host.phase = 'discuss'; broadcastHostState(); return;
@@ -675,6 +671,7 @@ function hostContinue(){
       var p = host.players.get(vr.top[0]);
       if(p){ p.alive = false; votedOut = p; }
     }
+    if(votedOut && votedOut.id === host.sheriffId){ host.sheriffId = null; host.sheriffReelection = true; }
     if(checkWin()){
       host.phase = 'over';
       host.allRoles = [];
@@ -699,6 +696,7 @@ function restartHost(){
   host.lastGuard = null; host.witchHealUsed = false; host.witchPoisonUsed = false;
   host.deaths = []; host.hunterId = null; host.hunterAfter = null;
   host.votes = {}; host.voteResult = null; host.winner = null; host.allRoles = null;
+  host.sheriffId = null; host.sheriffCandidates = []; host.sheriffVotes = {}; host.sheriffReelection = false;
   for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
     p.value.role = null; p.value.alive = true; p.value.seerChecks = [];
   }
@@ -713,35 +711,20 @@ function sendAction(kind, target, data){
     var me = host.players.get(1);
     hostHandleAction(me, { kind: kind, target: target, data: data });
   } else {
-    if(hostConn && hostConn.open){
-      hostConn.send({ type: 'action', kind: kind, target: target, data: data });
-    }
+    if(hostConn && hostConn.open){ hostConn.send({ type: 'action', kind: kind, target: target, data: data }); }
   }
 }
 
-function doStart(){
-  if(isHost){
-    if(!hostStartGame()){ lastErr = '人数必须 6-12 人'; render(); }
-  }
-}
-function doContinue(){
-  if(isHost) hostContinue();
-}
-function doRestart(){
-  if(isHost) restartHost();
-}
-
+function doStart(){ if(isHost){ if(!hostStartGame()){ lastErr = '人数必须 6-12 人'; render(); } } }
+function doContinue(){ if(isHost) hostContinue(); }
+function doRestart(){ if(isHost) restartHost(); }
 function act(kind, target, data){ sendAction(kind, target, data) }
-
 function setHeal(v){ witchSel.heal = v; render() }
 function setPoison(v){ witchSel.poison = v; render() }
 function confirmWitch(canHeal, canPoison){
   if(canHeal && witchSel.heal === undefined) return;
   if(canPoison && witchSel.poison === undefined) return;
-  act('witch', null, {
-    heal: canHeal ? !!witchSel.heal : false,
-    poison: canPoison ? witchSel.poison : null
-  });
+  act('witch', null, { heal: canHeal ? !!witchSel.heal : false, poison: canPoison ? witchSel.poison : null });
 }
 
 /* ============================================================
@@ -754,6 +737,9 @@ function render(){
   if(ph === 'lobby')       html = viewLobby();
   else if(ph === 'night')  html = viewNight();
   else if(ph === 'dawn')   html = viewDawn();
+  else if(ph === 'sheriffApply') html = viewSheriffApply();
+  else if(ph === 'sheriffVote') html = viewSheriffVote();
+  else if(ph === 'sheriffResult') html = viewSheriffResult();
   else if(ph === 'hunter') html = viewHunter();
   else if(ph === 'discuss')html = viewDiscuss();
   else if(ph === 'vote')   html = viewVote();
@@ -766,12 +752,6 @@ function render(){
 function viewEntry(){
   var savedName = localStorage.getItem('wolf_name') || '';
   var err = lastErr ? '<div class="err">' + esc(lastErr) + '</div>' : '';
-  var loading = connecting ? '<div class="center-screen"><div class="spinner"></div><p class="muted">正在连接信令服务器…</p></div>' : '';
-
-  if(connecting){
-    return '<div class="title">狼 人 杀</div>' + loading;
-  }
-
   return '<div class="title">狼 人 杀</div>' +
     '<div class="subtitle">手机联机 · 无需服务器</div>' +
     '<div class="card"><div class="label">你的昵称</div>' +
@@ -794,10 +774,10 @@ function viewLobby(){
   var rows = G.players.map(function(p, i){
     var meTag = p.id === me.id ? ' <span style="color:#8a8aa0;font-size:12px">(你)</span>' : '';
     var hostTag = p.id === G.hostId ? '<span class="ptag host">房主</span>' : '';
-    var offTag = p.connected ? '' : '<span class="ptag">掉线</span>';
-    return '<div class="prow ' + (p.connected ? '' : 'off') + ' ' + (p.id === me.id ? 'me' : '') + '">' +
+    var sheriffTag = p.isSheriff ? '<span class="sheriff-tag">🏅 警长</span>' : '';
+    return '<div class="prow ' + (p.id === me.id ? 'me' : '') + '">' +
       '<div class="avatar">' + (i + 1) + '</div>' +
-      '<div class="pname">' + esc(p.name) + meTag + '</div>' + hostTag + offTag + '</div>';
+      '<div class="pname">' + esc(p.name) + meTag + sheriffTag + '</div>' + hostTag + '</div>';
   }).join('');
   var tip = '';
   if(n < 6) tip = '<p class="muted">还需要 ' + (6 - n) + ' 人才能开始</p>';
@@ -805,12 +785,10 @@ function viewLobby(){
   var btn = me.isHost
     ? '<button class="primary big" onclick="doStart()" ' + (canStart ? '' : 'disabled') + '>开 始 游 戏</button>'
     : '<p class="muted" style="text-align:center;margin-top:20px">等待房主开始游戏…</p>';
-
   var shareBlock = me.isHost
-    ? '<div class="code-box"><div class="lbl">房 间 号</div><div class="num">' + G.code + '</div></div>' +
-      '<p class="share-tip">把这个房间号发给朋友<br>他们在同一页面输入即可加入</p>'
+    ? '<div class="roomcode">房间号<b>' + G.code + '</b></div>' +
+      '<p class="muted" style="text-align:center">把房间号告诉朋友，让他们在首页输入加入</p>'
     : '';
-
   return '<div class="panel">' + shareBlock +
     '<div class="label" style="margin-top:8px">玩家列表 (' + n + '/12)</div>' +
     '<div class="plist">' + rows + '</div>' + tip + btn + '</div>';
@@ -819,7 +797,8 @@ function viewLobby(){
 function topBadge(){
   var me = G.you, r = me.role ? ROLE_INFO[me.role] : null;
   var rb = r ? '<span class="rb ' + r.team + '">' + r.icon + ' ' + r.name + '</span>' : '';
-  return '<div class="topbadge"><span>' + G.code + ' 房 · 第 ' + (G.day || 0) + ' 天</span>' + rb + '</div>';
+  var sh = (G.sheriffId === me.id) ? ' <span class="sheriff-tag">🏅 警长</span>' : '';
+  return '<div class="topbadge"><span>' + G.code + ' 房 · 第 ' + (G.day || 0) + ' 天' + sh + '</span>' + rb + '</div>';
 }
 
 function deadBanner(){
@@ -920,6 +899,53 @@ function viewSeerResult(p){
     '<button class="primary big" onclick="act(\'seer\',null)">确认，闭眼</button></div>';
 }
 
+function viewSheriffApply(){
+  var me = G.you;
+  if(!me.alive) return deadBanner();
+  var isUp = G.sheriffCandidates && G.sheriffCandidates.indexOf(me.id) !== -1;
+  var btn = isUp 
+    ? '<button class="ghost" onclick="act(\'sheriffApply\', null, {up:false})">退 出 竞 选</button>'
+    : '<button class="primary big" onclick="act(\'sheriffApply\', null, {up:true})">上 警 竞 选</button>';
+  var list = (G.sheriffCandidates || []).map(function(id){ return id + '号'; }).join('、');
+  return '<div class="panel center">' + topBadge() +
+    '<div class="phasehead">🏅 警长竞选</div>' +
+    '<div class="bigmsg">第 ' + G.day + ' 天 · 上警环节</div>' +
+    '<p class="muted">想要竞选警长的玩家请点击下方按钮</p>' +
+    (list ? '<p class="hint">已上警：' + list + '</p>' : '<p class="muted">暂无玩家上警</p>') +
+    '<div style="height:10px"></div>' + btn +
+    '<p class="muted" style="font-size:12px;margin-top:16px">* 所有人表态后，由房主点击下方按钮进入投票</p>' +
+    (me.isHost ? '<button class="primary big" onclick="doContinue()" style="margin-top:10px">确 定 上 警 名 单</button>' : '<p class="muted">等待房主确认上警名单…</p>') +
+    '</div>';
+}
+
+function viewSheriffVote(){
+  var me = G.you;
+  if(!me.alive) return deadBanner();
+  var p = G.prompt;
+  if(p && p.kind === 'sheriffVote'){
+    var btns = p.targets.map(function(id){ return '<button class="pcard" onclick="act(\'sheriffVote\',' + id + ')">' + id + '号</button>' }).join('');
+    return '<div class="panel">' + topBadge() +
+      '<div class="phasehead">🗳️ 警长竞选投票</div>' +
+      '<p class="muted">请选择你支持的警长候选人</p>' +
+      '<div class="grid">' + btns + '</div></div>';
+  }
+  return '<div class="center-screen">' + topBadge() +
+    '<div style="font-size:52px">🗳️</div>' +
+    '<div class="bigmsg">你已完成投票</div>' +
+    '<p class="muted">等待其他玩家投票…</p></div>';
+}
+
+function viewSheriffResult(){
+  var me = G.you;
+  var sheriffName = G.sheriffId ? (G.sheriffId + '号') : '无（警徽流失）';
+  return '<div class="panel center">' + topBadge() +
+    '<div class="phasehead">🏅 警长竞选结果</div>' +
+    '<div class="bigmsg" style="margin:20px 0;font-size:22px;">' + sheriffName + '</div>' +
+    (G.sheriffId ? '<p class="muted">当选警长，投票时拥有 1.5 票权</p>' : '<p class="muted">平票，警徽流失</p>') +
+    (me.isHost ? '<button class="primary big" onclick="doContinue()">继 续</button>' : '<p class="muted">等待房主继续…</p>') +
+    '</div>';
+}
+
 function viewDawn(){
   var me = G.you, deaths = G.deaths || [];
   var txt = deaths.length ? deaths.map(function(d){ return d.id + '号' }).join('、') + ' 死亡' : '平安夜，没有人死亡';
@@ -1004,9 +1030,10 @@ function viewOver(){
   var all = G.allRoles || [];
   var rows = all.map(function(p){
     var r = ROLE_INFO[p.role] || { name:'?', team:'good', icon:'❔' };
+    var sh = p.id === G.sheriffId ? '<span class="sheriff-tag">🏅 警长</span>' : '';
     return '<div class="plrow ' + (p.alive ? '' : 'dead') + '">' +
       '<span class="plid">' + p.id + '号</span>' +
-      '<span class="plrole ' + r.team + '">' + r.icon + ' ' + r.name + '</span>' +
+      '<span class="plrole ' + r.team + '">' + r.icon + ' ' + r.name + sh + '</span>' +
       '<span class="plstate">' + (p.alive ? '存活' : '出局') + '</span></div>';
   }).join('');
   var btn = me.isHost
@@ -1017,10 +1044,7 @@ function viewOver(){
     '<div class="playerlist">' + rows + '</div>' + btn + '</div>';
 }
 
-/* ============================================================
-   启动
-   ============================================================ */
-render();
+(function init(){render(); connect().catch(function(){})})();
 </script>
 <script>
 if ('serviceWorker' in navigator) {
