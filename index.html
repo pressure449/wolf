@@ -157,7 +157,7 @@ var witchSel = { heal: undefined, poison: undefined };
 var aiLastSpeak = 0;
 
 var BROKER_URL = 'wss://broker.emqx.io:8084/mqtt';
-var TOPIC_PREFIX = 'wolfchinese-v10/room/';
+var TOPIC_PREFIX = 'wolfchinese-v12/room/';
 
 /* ============================================================
    AI 配置
@@ -173,50 +173,50 @@ var AI_CONFIG = {
 
 var AI_PRESETS = {
   puter: {
-    name: 'Puter.js（免费无需Key）',
+    name: 'Puter.js（免 Key)',
     model: 'gpt-5-nano',
     endpoint: '',
     needProxy: false,
     needKey: false,
     format: 'puter',
     rateLimitMs: 3000,
-    hint: '免费、免 Key、免梯子，浏览器直接调用'
-  },
-  openrouter: {
-    name: 'OpenRouter Llama 3.1',
-    model: 'meta-llama/llama-3.1-8b-instruct:free',
-    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-    needProxy: false,
-    needKey: true,
-    format: 'openai',
-    rateLimitMs: 3000,
-    hint: '每天免费 50 次'
+    hint: '由用户承担费用'
   },
   groq: {
-    name: 'Groq Llama 3.1',
+    name: 'Groq（需梯子）',
     model: 'llama-3.1-8b-instant',
     endpoint: 'https://api.groq.com/openai/v1/chat/completions',
     needProxy: false,
     needKey: true,
     format: 'openai',
     rateLimitMs: 1000,
-    hint: '速度最快，需梯子'
+    hint: 'console.groq.com 注册拿 Key'
+  },
+  openrouter: {
+    name: 'OpenRouter（免费(额度)）',
+    model: 'meta-llama/llama-3.1-8b-instruct:free',
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    needProxy: false,
+    needKey: true,
+    format: 'openai',
+    rateLimitMs: 3000,
+    hint: 'openrouter.ai/keys 注册拿 Key，每天 50 次免费'
   },
   zhipu: {
-    name: '智谱 GLM-4-Flash',
+    name: '智谱 GLM-4-Flash（需代理）',
     model: 'glm-4-flash-250414',
     endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
     needProxy: true,
     needKey: true,
     format: 'openai',
     rateLimitMs: 1000,
-    hint: '免费但需代理绕过 CORS'
+    hint: '完全免费但需代理'
   }
 };
 
 var AI_DEBUG = {
   lastStatus: 'never',
-  lastMessage: '尚未测试',
+  lastMessage: '未启用 AI，使用模板发言',
   lastDuration: 0,
   okCount: 0,
   errCount: 0
@@ -224,11 +224,11 @@ var AI_DEBUG = {
 
 function loadAIConfig(){
   try {
-    var saved = localStorage.getItem('wolf_ai_config_v10');
+    var saved = localStorage.getItem('wolf_ai_config_v12');
     if(saved){
       var obj = JSON.parse(saved);
       AI_CONFIG.enabled = !!obj.enabled;
-      AI_CONFIG.provider = obj.provider || 'puter';
+      AI_CONFIG.provider = obj.provider || 'openrouter';
       AI_CONFIG.apiKey = obj.apiKey || '';
       AI_CONFIG.proxyUrl = obj.proxyUrl || '';
       AI_CONFIG.model = obj.model || '';
@@ -239,7 +239,7 @@ function loadAIConfig(){
   }
 }
 function saveAIConfig(){
-  localStorage.setItem('wolf_ai_config_v10', JSON.stringify({
+  localStorage.setItem('wolf_ai_config_v12', JSON.stringify({
     enabled: AI_CONFIG.enabled,
     provider: AI_CONFIG.provider,
     apiKey: AI_CONFIG.apiKey,
@@ -273,7 +273,7 @@ function setNet(on){
 }
 
 /* ============================================================
-   LLM 调用（仅用于发言，投票不走 LLM）
+   LLM 调用
    ============================================================ */
 var llmQueue = [];
 var llmProcessing = false;
@@ -289,8 +289,7 @@ async function processLLMQueue(){
   llmProcessing = true;
   while(llmQueue.length){
     var preset = AI_PRESETS[AI_CONFIG.provider];
-    var minGap = (preset && preset.rateLimitMs) ? preset.rateLimitMs : 3000;
-
+    var minGap = (preset && preset.rateLimitMs) ? preset.rateLimitMs : 4000;
     var elapsed = Date.now() - llmLastRequestTime;
     if(elapsed < minGap){
       var waitMs = minGap - elapsed;
@@ -298,7 +297,6 @@ async function processLLMQueue(){
       render();
       await new Promise(function(r){ setTimeout(r, waitMs) });
     }
-
     var task = llmQueue.shift();
     try {
       llmLastRequestTime = Date.now();
@@ -316,9 +314,7 @@ function extractPuterReply(response){
     if(response.message.content){
       if(typeof response.message.content === 'string') return response.message.content;
       if(Array.isArray(response.message.content)){
-        return response.message.content.map(function(p){
-          return p.text || p.content || '';
-        }).join('');
+        return response.message.content.map(function(p){ return p.text || p.content || ''; }).join('');
       }
     }
   }
@@ -326,9 +322,7 @@ function extractPuterReply(response){
   if(response.content){
     if(typeof response.content === 'string') return response.content;
     if(Array.isArray(response.content)){
-      return response.content.map(function(p){
-        return p.text || p.content || '';
-      }).join('');
+      return response.content.map(function(p){ return p.text || p.content || ''; }).join('');
     }
   }
   if(Array.isArray(response)){
@@ -347,7 +341,7 @@ async function callLLM(systemPrompt, userPrompt, maxTokens, retryCount){
   retryCount = retryCount || 0;
   if(!AI_CONFIG.enabled){
     AI_DEBUG.lastStatus = 'disabled';
-    AI_DEBUG.lastMessage = '未启用';
+    AI_DEBUG.lastMessage = '未启用 AI';
     return null;
   }
   var preset = AI_PRESETS[AI_CONFIG.provider];
@@ -364,11 +358,10 @@ async function callLLM(systemPrompt, userPrompt, maxTokens, retryCount){
     return null;
   }
 
-  /* -------- Puter.js -------- */
   if(AI_CONFIG.provider === 'puter'){
     if(typeof puter === 'undefined' || !puter.ai){
       AI_DEBUG.lastStatus = 'error';
-      AI_DEBUG.lastMessage = 'Puter.js 未加载（请检查网络）';
+      AI_DEBUG.lastMessage = 'Puter.js 未加载';
       AI_DEBUG.errCount++;
       return null;
     }
@@ -383,60 +376,32 @@ async function callLLM(systemPrompt, userPrompt, maxTokens, retryCount){
       );
       AI_DEBUG.lastDuration = Date.now() - t0;
       var reply = extractPuterReply(response);
-
       if(!reply || String(reply).trim().length === 0){
         AI_DEBUG.lastStatus = 'error';
-        AI_DEBUG.lastMessage = 'Puter 返回空内容';
+        AI_DEBUG.lastMessage = 'Puter 返回空';
         AI_DEBUG.errCount++;
         return null;
       }
-
-      var replyStr = String(reply).trim();
-      var lower = replyStr.toLowerCase();
-      if(lower.indexOf('error') === 0 || lower.indexOf('failed') === 0 ||
-         lower.indexOf('unauthorized') >= 0 || lower.indexOf('rate limit') >= 0 ||
-         lower.indexOf('quota') >= 0){
-        AI_DEBUG.lastStatus = 'error';
-        AI_DEBUG.lastMessage = 'Puter 报错：' + replyStr.slice(0, 150);
-        AI_DEBUG.errCount++;
-        return null;
-      }
-
       AI_DEBUG.lastStatus = 'ok';
       AI_DEBUG.lastMessage = '正常，耗时 ' + AI_DEBUG.lastDuration + 'ms';
       AI_DEBUG.okCount++;
-      return replyStr;
+      return String(reply).trim();
     } catch(e){
       AI_DEBUG.lastDuration = Date.now() - t0;
       AI_DEBUG.lastStatus = 'error';
-      var msg = e.message || String(e);
-      if(retryCount < 1 && (msg.indexOf('network') >= 0 || msg.indexOf('fetch') >= 0 || msg.indexOf('timeout') >= 0)){
-        AI_DEBUG.lastMessage = '⏳ Puter 请求失败，5 秒后重试…';
-        render();
-        await new Promise(function(r){ setTimeout(r, 5000) });
-        return callLLM(systemPrompt, userPrompt, maxTokens, retryCount + 1);
-      }
-      AI_DEBUG.lastMessage = 'Puter 异常：' + msg.slice(0, 150);
+      AI_DEBUG.lastMessage = 'Puter 异常：' + (e.message || e);
       AI_DEBUG.errCount++;
-      console.error('Puter 异常', e);
       return null;
     }
   }
 
-  /* -------- 其他 provider -------- */
   var url, headers, body;
   if(AI_CONFIG.provider === 'zhipu'){
     url = AI_CONFIG.proxyUrl;
-    headers = {
-      'Content-Type': 'application/json',
-      'X-Zhipu-Key': AI_CONFIG.apiKey
-    };
+    headers = { 'Content-Type': 'application/json', 'X-Zhipu-Key': AI_CONFIG.apiKey };
   } else {
     url = preset.endpoint;
-    headers = { 'Content-Type': 'application/json' };
-    if(preset.needKey){
-      headers['Authorization'] = 'Bearer ' + AI_CONFIG.apiKey;
-    }
+    headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (AI_CONFIG.apiKey || 'not-needed') };
     if(AI_CONFIG.provider === 'openrouter'){
       headers['HTTP-Referer'] = location.origin;
       headers['X-Title'] = 'Wolf Game';
@@ -454,68 +419,43 @@ async function callLLM(systemPrompt, userPrompt, maxTokens, retryCount){
 
   var t1 = Date.now();
   var controller = new AbortController();
-  var timeoutId = setTimeout(function(){ controller.abort() }, 30000);
+  var timeoutId = setTimeout(function(){ controller.abort() }, 20000);
 
   try {
-    var res = await fetch(url, {
-      method: 'POST',
-      headers: headers,
-      body: body,
-      signal: controller.signal
-    });
+    var res = await fetch(url, { method: 'POST', headers: headers, body: body, signal: controller.signal });
     clearTimeout(timeoutId);
     AI_DEBUG.lastDuration = Date.now() - t1;
     var text = await res.text();
 
     if(res.status === 429){
       if(retryCount < 1){
-        AI_DEBUG.lastMessage = '⏳ 上游限流，10 秒后重试…';
+        AI_DEBUG.lastMessage = '⏳ 上游限流，8 秒后重试…';
         render();
-        await new Promise(function(r){ setTimeout(r, 10000) });
+        await new Promise(function(r){ setTimeout(r, 8000) });
         return callLLM(systemPrompt, userPrompt, maxTokens, retryCount + 1);
       }
       AI_DEBUG.lastStatus = 'error';
-      AI_DEBUG.lastMessage = 'HTTP 429 限流';
+      AI_DEBUG.lastMessage = 'HTTP 429';
       AI_DEBUG.errCount++;
       return null;
     }
-
     if(res.status !== 200){
       AI_DEBUG.lastStatus = 'error';
-      AI_DEBUG.lastMessage = 'HTTP ' + res.status + '：' + text.slice(0, 150);
+      AI_DEBUG.lastMessage = 'HTTP ' + res.status + '：' + text.slice(0, 120);
       AI_DEBUG.errCount++;
       return null;
     }
 
     var data;
     try { data = JSON.parse(text); } catch(e){
-      var lower2 = text.toLowerCase();
-      var isError = lower2.indexOf('error') >= 0 || lower2.indexOf('credit') >= 0 ||
-                    lower2.indexOf('api key') >= 0 || lower2.indexOf('invalid') >= 0 ||
-                    lower2.indexOf('unauthorized') >= 0 || lower2.indexOf('forbidden') >= 0 ||
-                    lower2.indexOf('rate limit') >= 0 || lower2.indexOf('quota') >= 0 ||
-                    lower2.indexOf('too many') >= 0;
-      if(isError){
-        AI_DEBUG.lastStatus = 'error';
-        AI_DEBUG.lastMessage = '接口报错：' + text.slice(0, 200);
-        AI_DEBUG.errCount++;
-        return null;
-      }
-      if(text && text.trim().length > 0 && text.length < 500){
-        AI_DEBUG.lastStatus = 'ok';
-        AI_DEBUG.lastMessage = '正常（纯文本），耗时 ' + AI_DEBUG.lastDuration + 'ms';
-        AI_DEBUG.okCount++;
-        return text.trim();
-      }
       AI_DEBUG.lastStatus = 'error';
       AI_DEBUG.lastMessage = '返回非 JSON';
       AI_DEBUG.errCount++;
       return null;
     }
-
     if(data.error){
       AI_DEBUG.lastStatus = 'error';
-      AI_DEBUG.lastMessage = 'API 报错：' + JSON.stringify(data.error).slice(0, 180);
+      AI_DEBUG.lastMessage = 'API 报错：' + JSON.stringify(data.error).slice(0, 150);
       AI_DEBUG.errCount++;
       return null;
     }
@@ -523,19 +463,13 @@ async function callLLM(systemPrompt, userPrompt, maxTokens, retryCount){
     var reply2 = null;
     if(data.choices && data.choices[0] && data.choices[0].message){
       reply2 = data.choices[0].message.content;
-    } else if(typeof data === 'string'){
-      reply2 = data;
-    } else if(data.reply){
-      reply2 = data.reply;
     }
-
     if(reply2){
       AI_DEBUG.lastStatus = 'ok';
       AI_DEBUG.lastMessage = '正常，耗时 ' + AI_DEBUG.lastDuration + 'ms';
       AI_DEBUG.okCount++;
       return String(reply2).trim();
     }
-
     AI_DEBUG.lastStatus = 'error';
     AI_DEBUG.lastMessage = '返回格式异常';
     AI_DEBUG.errCount++;
@@ -545,8 +479,8 @@ async function callLLM(systemPrompt, userPrompt, maxTokens, retryCount){
     AI_DEBUG.lastDuration = Date.now() - t1;
     AI_DEBUG.lastStatus = 'error';
     var msg2 = e.message || String(e);
-    if(e.name === 'AbortError'){ msg2 = '请求超时（30 秒）'; }
-    else if(msg2.indexOf('Failed to fetch') >= 0){ msg2 = '网络失败（CORS 或不可达）'; }
+    if(e.name === 'AbortError'){ msg2 = '请求超时'; }
+    else if(msg2.indexOf('Failed to fetch') >= 0){ msg2 = '网络失败'; }
     AI_DEBUG.lastMessage = msg2;
     AI_DEBUG.errCount++;
     return null;
@@ -852,7 +786,7 @@ function countSuspicionFromChat(candidates){
   var re2 = /预言家[^，。\n]{0,20}?(\d+)\s*号/g;
   for(var i = 0; i < host.chatLog.length; i++){
     var c = host.chatLog[i];
-    if(c.isAI && !c.fromModel) continue; // 只统计真模型发言或真人发言
+    if(c.isAI && !c.fromModel) continue;
     var m;
     re1.lastIndex = 0;
     while((m = re1.exec(c.text)) !== null){
@@ -876,7 +810,6 @@ function processAIActions(){
 
   if(host.phase === 'night'){
     var step = host.nightStep;
-
     function roleAlive(r){
       for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
         if(p.value.alive && p.value.role === r) return true;
@@ -902,7 +835,6 @@ function processAIActions(){
       }
       return;
     }
-
     if(step === 1){
       for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
         var pl = p.value;
@@ -917,7 +849,6 @@ function processAIActions(){
       }
       return;
     }
-
     if(step === 2){
       for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
         var pl = p.value;
@@ -939,7 +870,6 @@ function processAIActions(){
       }
       return;
     }
-
     if(step === 3){
       for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
         var pl = p.value;
@@ -981,7 +911,6 @@ function processAIActions(){
       else if(pl.role === 'wolf') shouldApply = Math.random() < 0.7;
       else shouldApply = Math.random() < 0.25;
       if(shouldApply) host.sheriffCandidates.push(pl.id);
-
       var allApplied = true;
       for(var it2 = host.players.values(), q = it2.next(); !q.done; q = it2.next()){
         if(q.value.alive && !host.sheriffApplied[q.value.id]){ allApplied = false; break; }
@@ -1021,7 +950,6 @@ function processAIActions(){
     return;
   }
 
-  /* -------- 白天投票：完全规则，不走 LLM -------- */
   if(host.phase === 'vote'){
     for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
       var pl = p.value;
@@ -1035,14 +963,12 @@ function processAIActions(){
       if(!vts.length){ return; }
 
       if(pl.role === 'wolf'){
-        // 狼人抱团：房主统一选一个好人
         if(host.wolfVoteTarget == null || vts.indexOf(host.wolfVoteTarget) < 0){
           var nonWolves = vts.filter(function(id){ var t = host.players.get(id); return t && t.role !== 'wolf'; });
           host.wolfVoteTarget = nonWolves.length ? pickRandom(nonWolves) : pickRandom(vts);
         }
         host.votes[pl.id] = host.wolfVoteTarget;
       } else if(pl.role === 'seer' && pl.seerChecks && pl.seerChecks.length){
-        // 预言家优先投查到的狼
         var wolfFound = null;
         for(var i = 0; i < pl.seerChecks.length; i++){
           if(pl.seerChecks[i].isWolf && vts.indexOf(pl.seerChecks[i].id) >= 0){
@@ -1052,7 +978,6 @@ function processAIActions(){
         if(wolfFound){
           host.votes[pl.id] = wolfFound;
         } else {
-          // 没有查杀就跟着大家怀疑最多的投
           var counts = countSuspicionFromChat(vts);
           var best = null, bestN = 0;
           for(var k in counts){
@@ -1061,7 +986,6 @@ function processAIActions(){
           host.votes[pl.id] = best != null ? best : pickRandom(vts);
         }
       } else {
-        // 好人 AI：统计聊天记录里被怀疑最多的
         var counts2 = countSuspicionFromChat(vts);
         var best2 = null, bestN2 = 0;
         for(var k in counts2){
@@ -1141,7 +1065,7 @@ function canUseLLM(){
 }
 
 /* ============================================================
-   LLM 发言（带 12 秒超时降级）
+   LLM 发言（12 秒超时 → 降级到模板）
    ============================================================ */
 function buildGameContext(ai){
   var alive = [], dead = [];
@@ -1174,8 +1098,7 @@ function buildGameContext(ai){
     alive: alive.join('、'),
     dead: dead.join('、') || '无',
     myInfo: myInfo,
-    history: history,
-    totalPlayers: host.players.size
+    history: history
   };
 }
 
@@ -1185,19 +1108,19 @@ function aiSpeakByLLM(ai){
     (ROLE_INFO[ai.role] ? ROLE_INFO[ai.role].name : '?') + '】。' +
     '请像真实玩家一样用中文发言，口语化，1-2句话，不超过60字。' +
     '关键规则：' +
-    '1. 只根据「之前发言」中有明确依据的内容怀疑别人，不要凭空乱说；' +
+    '1. 只根据「之前发言」中有明确依据的内容怀疑别人；' +
     '2. 如果之前没有人提到过某个玩家，就不要突然说"我觉得X号很奇怪"；' +
     '3. 如果你是预言家，报查验结果；如果你是狼人，可以伪装或泼脏水；' +
     '4. 如果你是村民，可以表达自己的判断，但不要总怀疑别人；' +
-    '5. 如果实在没什么可说，就说"我暂时不发表意见，听大家发言"或"我过"之类的话；' +
-    '6. 只输出你说的话本身，不要加引号、括号、前缀或任何解释。';
+    '5. 如果实在没什么可说，就说"我过"或"听大家发言"；' +
+    '6. 只输出你说的话本身，不要加引号、括号或解释。';
 
   var user = '当前是第' + ctx.day + '天讨论阶段。\n' +
     ctx.myInfo + '\n' +
     '存活玩家：' + ctx.alive + '\n' +
     '已出局：' + ctx.dead + '\n' +
     '之前的发言：\n' + (ctx.history || '（还没有人发言）') + '\n\n' +
-    '请你说一句话（严格60字内，不要换行）：';
+    '请你说一句话（60字内，不要换行）：';
 
   queueLLM(async function(){
     var text = null;
@@ -1206,9 +1129,7 @@ function aiSpeakByLLM(ai){
         callLLM(system, user, 100),
         new Promise(function(resolve){ setTimeout(function(){ resolve(null) }, 12000) })
       ]);
-    } catch(e){
-      text = null;
-    }
+    } catch(e){ text = null; }
     if(!text){
       text = generateAIChatFallback(ai);
       hostSendChat(ai.id, text, false);
@@ -1220,36 +1141,200 @@ function aiSpeakByLLM(ai){
 }
 
 /* ============================================================
-   降级模板
+   ★ 优化版模板发言 ★
+   根据角色、场上局势、是否被怀疑动态生成
    ============================================================ */
 function generateAIChatFallback(ai){
-  var alive = [];
+  var aliveIds = [];
+  var others = [];
   for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
-    if(p.value.alive && p.value.id !== ai.id) alive.push(p.value.id);
+    if(p.value.alive){
+      aliveIds.push(p.value.id);
+      if(p.value.id !== ai.id) others.push(p.value.id);
+    }
   }
-  if(!alive.length) return null;
-  var target = pickRandom(alive);
+  if(!others.length) return null;
 
+  var day = host.day || 1;
+  var isLate = aliveIds.length <= 4;
+  var target = pickRandom(others);
+  var myId = ai.id;
+
+  // 是否被其他人怀疑过
+  var suspected = false;
+  for(var i = 0; i < (host.chatLog || []).length; i++){
+    var c = host.chatLog[i];
+    if(c.id === myId) continue;
+    var re = new RegExp('(^|[^0-9])' + myId + '\\s*号');
+    if(re.test(c.text)){ suspected = true; break; }
+  }
+
+  // 场上被怀疑最多的
+  var suspectCount = {};
+  for(var i = 0; i < (host.chatLog || []).length; i++){
+    var c = host.chatLog[i];
+    if(c.id === myId) continue;
+    var mm = c.text.match(/(\d+)\s*号/g);
+    if(mm){
+      for(var j = 0; j < mm.length; j++){
+        var id = parseInt(mm[j]);
+        if(id !== myId && others.indexOf(id) >= 0){
+          suspectCount[id] = (suspectCount[id] || 0) + 1;
+        }
+      }
+    }
+  }
+  var hot = null, hotN = 0;
+  for(var k in suspectCount){
+    if(suspectCount[k] > hotN){ hotN = suspectCount[k]; hot = parseInt(k); }
+  }
+
+  /* ============ 预言家 ============ */
   if(ai.role === 'seer'){
     var wolfFound = null;
     if(ai.seerChecks){
       for(var i = 0; i < ai.seerChecks.length; i++){
-        if(ai.seerChecks[i].isWolf) wolfFound = ai.seerChecks[i];
+        if(ai.seerChecks[i].isWolf && others.indexOf(ai.seerChecks[i].id) >= 0){
+          wolfFound = ai.seerChecks[i].id; break;
+        }
       }
     }
-    if(wolfFound && !ai._announcedWolf){
+    // 第一次发言：跳预言家
+    if(!ai._announcedWolf){
       ai._announcedWolf = true;
-      return '我是预言家，' + wolfFound.id + ' 号是狼人！';
+      if(wolfFound){
+        return '我是预言家，' + wolfFound + '号是查杀，大家跟我投。';
+      }
+      return '我是预言家，昨晚验了个好人。';
     }
-    return '我是预言家，' + target + ' 号你要么自曝要么被投。';
+    // 已经跳过之后
+    if(wolfFound){
+      return pickRandom([
+        '预言家视角，' + wolfFound + '号就是狼，别犹豫。',
+        '警徽在我这里，' + wolfFound + '号必出。',
+        '我再强调：' + wolfFound + '号是查杀。',
+        wolfFound + '号你还有什么好说的？'
+      ]);
+    }
+    if(isLate){
+      return pickRandom([
+        '还剩' + aliveIds.length + '人，我看' + target + '号像狼。',
+        '现在关键，我信' + target + '号。',
+        '预言家视角，' + target + '号我是好人卡。'
+      ]);
+    }
+    return pickRandom([
+      '我信' + target + '号，其他再看看。',
+      '我给' + target + '号一个好人身份。'
+    ]);
   }
+
+  /* ============ 狼人 ============ */
   if(ai.role === 'wolf'){
-    return '我觉得 ' + target + ' 号发言很奇怪，像个狼。';
+    // 被怀疑 → 反击
+    if(suspected){
+      return pickRandom([
+        '我不是狼，投我会亏一个轮次。',
+        '我是好人，别被带节奏了。',
+        '你们想清楚，投我等于给狼送分。',
+        '我是村民，' + target + '号更像是狼。'
+      ]);
+    }
+    // 有热门怀疑 → 跟风
+    if(hot != null){
+      return pickRandom([
+        '我跟票，' + hot + '号我也觉得有问题。',
+        '大家都怀疑' + hot + '号，那我也出一票。',
+        hot + '号发言确实怪，出他。',
+        '先出' + hot + '号看看。'
+      ]);
+    }
+    if(isLate){
+      return pickRandom([
+        '现在信息太少，' + target + '号我觉得不太对。',
+        '我怀疑' + target + '号。',
+        '场上太安静，' + target + '号你说句话。'
+      ]);
+    }
+    if(day === 1){
+      return pickRandom([
+        '我是村民，先听发言。',
+        '过，没什么信息。',
+        '我先过，看谁急。',
+        '没什么好说的，我过。',
+        '划水听警徽。'
+      ]);
+    }
+    return pickRandom([
+      '我过，没什么想说的。',
+      '先听其他人，我好人。',
+      '我信警徽，跟票。'
+    ]);
+  }
+
+  /* ============ 女巫 ============ */
+  if(ai.role === 'witch'){
+    if(isLate){
+      return pickRandom([
+        '我是女巫，药已经用掉了。',
+        '女巫视角，我建议出' + target + '号。',
+        '我没药了，靠你们。'
+      ]);
+    }
+    return pickRandom([
+      '我建议投' + target + '号。',
+      '我好人，怀疑' + target + '号。',
+      '跟票' + target + '号。',
+      '我过，没什么特别想说的。'
+    ]);
+  }
+
+  /* ============ 猎人 ============ */
+  if(ai.role === 'hunter'){
+    if(suspected){
+      return pickRandom([
+        '我是好人，投我你们会后悔的。',
+        '我身份不小，想清楚再投。',
+        '我不是狼，信我。'
+      ]);
+    }
+    return pickRandom([
+      '我是好人，建议投' + target + '号。',
+      '我建议出' + target + '号。',
+      '过，没什么信息。',
+      '看警徽，我跟票。'
+    ]);
+  }
+
+  /* ============ 村民 ============ */
+  if(suspected){
+    return pickRandom([
+      '我村民，投我没意义。',
+      '我是好人，你们想清楚。',
+      '投我等于亏一轮。'
+    ]);
+  }
+  if(hot != null){
+    return pickRandom([
+      '我也怀疑' + hot + '号。',
+      '跟票' + hot + '号。',
+      '大家都说' + hot + '号有问题，我信一下。',
+      hot + '号你解释一下？'
+    ]);
+  }
+  if(isLate){
+    return pickRandom([
+      '最后阶段，' + target + '号你出个身份。',
+      '我怀疑' + target + '号。',
+      '没头绪，跟票吧。'
+    ]);
   }
   return pickRandom([
-    '我怀疑 ' + target + ' 号，投票跟你们走。',
-    '目前没什么头绪，继续听发言。',
-    '刚才 ' + target + ' 号的发言逻辑有点问题。'
+    '我是村民，先听发言。',
+    '过，没什么信息。',
+    '我过，看大家怎么说。',
+    '先划水，听警徽。',
+    '我好人，听你们的。'
   ]);
 }
 
@@ -1834,7 +1919,7 @@ function viewEntry(){
     '<button class="ghost" onclick="joinRoom()">加 入 房 间</button>' + err +
     '<p class="muted" style="margin-top:26px;font-size:12.5px;line-height:1.9">' +
     '· 房主可添加 AI 一起玩<br>' +
-    '· 默认 Puter.js（免费免 Key）<br>' +
+    '· 有条件可用 AI，没条件用模板发言<br>' +
     '· 讨论阶段可打字聊天</p>' +
     viewAISettingsCard();
 }
@@ -1863,7 +1948,6 @@ function viewAISettingsCard(){
   if(preset.needKey){
     keyBlock = '<input class="ipt" id="aiKeyIpt" type="text" placeholder="粘贴 API Key" value="' + esc(AI_CONFIG.apiKey) + '" style="font-size:12px;letter-spacing:0;margin-bottom:8px" onblur="setAIKey()">';
   }
-
   var proxyBlock = '';
   if(preset.needProxy){
     proxyBlock = '<input class="ipt" id="aiProxyIpt" type="text" placeholder="代理地址" ' +
