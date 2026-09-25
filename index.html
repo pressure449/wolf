@@ -102,15 +102,15 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .netstatus.off{color:#e88a8a;background:rgba(176,58,58,.15)}
 .aibtn-row{display:flex;gap:8px;margin-top:8px}
 .aibtn-row button{flex:1}
-.chatbox{background:#13131f;border:1px solid #2e2e48;border-radius:12px;padding:12px;max-height:200px;overflow-y:auto;text-align:left;margin-top:10px}
-.chatmsg{font-size:13px;line-height:1.6;margin:4px 0;color:#c0c0d8;word-break:break-word}
+.chatbox{background:#13131f;border:1px solid #2e2e48;border-radius:12px;padding:12px;max-height:220px;overflow-y:auto;text-align:left;margin-top:10px}
+.chatmsg{font-size:13px;line-height:1.7;margin:5px 0;color:#c0c0d8;word-break:break-word}
 .chatmsg b{color:#d4af37;font-weight:600}
 .chatmsg .ai-name{color:#b090e0}
 .chatmsg.me b{color:#8ad0a6}
-.chatinput{display:flex;gap:8px;margin-top:8px}
-.chatinput input{flex:1;background:#13131f;border:1px solid #2e2e48;border-radius:10px;padding:11px 14px;color:#e8e8f0;font-size:14px;font-family:inherit;outline:none}
+.chatinput{display:flex;gap:8px;margin-top:8px;align-items:center}
+.chatinput input{flex:1;background:#13131f;border:1px solid #2e2e48;border-radius:10px;padding:11px 14px;color:#e8e8f0;font-size:14px;font-family:inherit;outline:none;min-width:0}
 .chatinput input:focus{border-color:#d4af37}
-.chatinput button{width:auto;padding:11px 20px;font-size:14px;border-radius:10px}
+.chatinput button.send{width:auto;padding:11px 16px;font-size:14px;border-radius:10px;flex-shrink:0}
 .aikey-box{background:#1a1a2b;border:1px solid #26263c;border-radius:12px;padding:14px;margin-top:10px;font-size:13px;color:#9a9ab5}
 .aikey-box .status{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .aikey-box .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
@@ -155,9 +155,10 @@ var G = null;
 var lastErr = '';
 var witchSel = { heal: undefined, poison: undefined };
 var aiLastSpeak = 0;
+var chatJustSent = 0;
 
 var BROKER_URL = 'wss://broker.emqx.io:8084/mqtt';
-var TOPIC_PREFIX = 'wolfchinese-v12/room/';
+var TOPIC_PREFIX = 'wolfchinese-v14/room/';
 
 /* ============================================================
    AI 配置
@@ -172,59 +173,43 @@ var AI_CONFIG = {
 };
 
 var AI_PRESETS = {
-  puter: {
-    name: 'Puter.js（免 Key)',
-    model: 'gpt-5-nano',
-    endpoint: '',
-    needProxy: false,
-    needKey: false,
-    format: 'puter',
-    rateLimitMs: 3000,
-    hint: '由用户承担费用'
-  },
-  groq: {
-    name: 'Groq（需梯子）',
-    model: 'llama-3.1-8b-instant',
-    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
-    needProxy: false,
-    needKey: true,
-    format: 'openai',
-    rateLimitMs: 1000,
-    hint: 'console.groq.com 注册拿 Key'
-  },
   openrouter: {
-    name: 'OpenRouter（免费(额度)）',
+    name: 'OpenRouter（推荐）',
     model: 'meta-llama/llama-3.1-8b-instruct:free',
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-    needProxy: false,
-    needKey: true,
-    format: 'openai',
-    rateLimitMs: 3000,
-    hint: 'openrouter.ai/keys 注册拿 Key，每天 50 次免费'
+    needProxy: false, needKey: true, format: 'openai', rateLimitMs: 3000,
+    hint: 'openrouter.ai/keys 注册拿 Key'
+  },
+  groq: {
+    name: 'Groq（最快）',
+    model: 'llama-3.1-8b-instant',
+    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+    needProxy: false, needKey: true, format: 'openai', rateLimitMs: 1000,
+    hint: 'console.groq.com 注册'
+  },
+  puter: {
+    name: 'Puter.js（免 Key）',
+    model: 'gpt-5-nano',
+    endpoint: '', needProxy: false, needKey: false, format: 'puter', rateLimitMs: 3000,
+    hint: 'Token由用户承担'
   },
   zhipu: {
-    name: '智谱 GLM-4-Flash（需代理）',
+    name: '智谱 GLM（需代理）',
     model: 'glm-4-flash-250414',
     endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
-    needProxy: true,
-    needKey: true,
-    format: 'openai',
-    rateLimitMs: 1000,
+    needProxy: true, needKey: true, format: 'openai', rateLimitMs: 1000,
     hint: '完全免费但需代理'
   }
 };
 
 var AI_DEBUG = {
-  lastStatus: 'never',
-  lastMessage: '未启用 AI，使用模板发言',
-  lastDuration: 0,
-  okCount: 0,
-  errCount: 0
+  lastStatus: 'never', lastMessage: '未启用 AI，使用模板发言',
+  lastDuration: 0, okCount: 0, errCount: 0
 };
 
 function loadAIConfig(){
   try {
-    var saved = localStorage.getItem('wolf_ai_config_v12');
+    var saved = localStorage.getItem('wolf_ai_config_v14');
     if(saved){
       var obj = JSON.parse(saved);
       AI_CONFIG.enabled = !!obj.enabled;
@@ -234,17 +219,12 @@ function loadAIConfig(){
       AI_CONFIG.model = obj.model || '';
     }
   } catch(e){}
-  if(!AI_CONFIG.model){
-    AI_CONFIG.model = AI_PRESETS[AI_CONFIG.provider].model;
-  }
+  if(!AI_CONFIG.model){ AI_CONFIG.model = AI_PRESETS[AI_CONFIG.provider].model; }
 }
 function saveAIConfig(){
-  localStorage.setItem('wolf_ai_config_v12', JSON.stringify({
-    enabled: AI_CONFIG.enabled,
-    provider: AI_CONFIG.provider,
-    apiKey: AI_CONFIG.apiKey,
-    proxyUrl: AI_CONFIG.proxyUrl,
-    model: AI_CONFIG.model
+  localStorage.setItem('wolf_ai_config_v14', JSON.stringify({
+    enabled: AI_CONFIG.enabled, provider: AI_CONFIG.provider,
+    apiKey: AI_CONFIG.apiKey, proxyUrl: AI_CONFIG.proxyUrl, model: AI_CONFIG.model
   }));
 }
 loadAIConfig();
@@ -368,10 +348,7 @@ async function callLLM(systemPrompt, userPrompt, maxTokens, retryCount){
     var t0 = Date.now();
     try {
       var response = await puter.ai.chat(
-        [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
+        [{ role:'system', content:systemPrompt }, { role:'user', content:userPrompt }],
         { model: AI_CONFIG.model }
       );
       AI_DEBUG.lastDuration = Date.now() - t0;
@@ -422,7 +399,7 @@ async function callLLM(systemPrompt, userPrompt, maxTokens, retryCount){
   var timeoutId = setTimeout(function(){ controller.abort() }, 20000);
 
   try {
-    var res = await fetch(url, { method: 'POST', headers: headers, body: body, signal: controller.signal });
+    var res = await fetch(url, { method:'POST', headers:headers, body:body, signal:controller.signal });
     clearTimeout(timeoutId);
     AI_DEBUG.lastDuration = Date.now() - t1;
     var text = await res.text();
@@ -1065,7 +1042,7 @@ function canUseLLM(){
 }
 
 /* ============================================================
-   LLM 发言（12 秒超时 → 降级到模板）
+   LLM 发言
    ============================================================ */
 function buildGameContext(ai){
   var alive = [], dead = [];
@@ -1093,13 +1070,7 @@ function buildGameContext(ai){
       return c.id + '号=' + (c.isWolf ? '狼人' : '好人');
     }).join('，');
   }
-  return {
-    day: host.day,
-    alive: alive.join('、'),
-    dead: dead.join('、') || '无',
-    myInfo: myInfo,
-    history: history
-  };
+  return { day: host.day, alive: alive.join('、'), dead: dead.join('、') || '无', myInfo: myInfo, history: history };
 }
 
 function aiSpeakByLLM(ai){
@@ -1115,10 +1086,8 @@ function aiSpeakByLLM(ai){
     '5. 如果实在没什么可说，就说"我过"或"听大家发言"；' +
     '6. 只输出你说的话本身，不要加引号、括号或解释。';
 
-  var user = '当前是第' + ctx.day + '天讨论阶段。\n' +
-    ctx.myInfo + '\n' +
-    '存活玩家：' + ctx.alive + '\n' +
-    '已出局：' + ctx.dead + '\n' +
+  var user = '当前是第' + ctx.day + '天讨论阶段。\n' + ctx.myInfo + '\n' +
+    '存活玩家：' + ctx.alive + '\n已出局：' + ctx.dead + '\n' +
     '之前的发言：\n' + (ctx.history || '（还没有人发言）') + '\n\n' +
     '请你说一句话（60字内，不要换行）：';
 
@@ -1141,12 +1110,10 @@ function aiSpeakByLLM(ai){
 }
 
 /* ============================================================
-   ★ 优化版模板发言 ★
-   根据角色、场上局势、是否被怀疑动态生成
+   优化版模板发言
    ============================================================ */
 function generateAIChatFallback(ai){
-  var aliveIds = [];
-  var others = [];
+  var aliveIds = [], others = [];
   for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
     if(p.value.alive){
       aliveIds.push(p.value.id);
@@ -1160,7 +1127,6 @@ function generateAIChatFallback(ai){
   var target = pickRandom(others);
   var myId = ai.id;
 
-  // 是否被其他人怀疑过
   var suspected = false;
   for(var i = 0; i < (host.chatLog || []).length; i++){
     var c = host.chatLog[i];
@@ -1169,7 +1135,6 @@ function generateAIChatFallback(ai){
     if(re.test(c.text)){ suspected = true; break; }
   }
 
-  // 场上被怀疑最多的
   var suspectCount = {};
   for(var i = 0; i < (host.chatLog || []).length; i++){
     var c = host.chatLog[i];
@@ -1189,7 +1154,6 @@ function generateAIChatFallback(ai){
     if(suspectCount[k] > hotN){ hotN = suspectCount[k]; hot = parseInt(k); }
   }
 
-  /* ============ 预言家 ============ */
   if(ai.role === 'seer'){
     var wolfFound = null;
     if(ai.seerChecks){
@@ -1199,15 +1163,11 @@ function generateAIChatFallback(ai){
         }
       }
     }
-    // 第一次发言：跳预言家
     if(!ai._announcedWolf){
       ai._announcedWolf = true;
-      if(wolfFound){
-        return '我是预言家，' + wolfFound + '号是查杀，大家跟我投。';
-      }
+      if(wolfFound) return '我是预言家，' + wolfFound + '号是查杀，大家跟我投。';
       return '我是预言家，昨晚验了个好人。';
     }
-    // 已经跳过之后
     if(wolfFound){
       return pickRandom([
         '预言家视角，' + wolfFound + '号就是狼，别犹豫。',
@@ -1219,8 +1179,7 @@ function generateAIChatFallback(ai){
     if(isLate){
       return pickRandom([
         '还剩' + aliveIds.length + '人，我看' + target + '号像狼。',
-        '现在关键，我信' + target + '号。',
-        '预言家视角，' + target + '号我是好人卡。'
+        '现在关键，我信' + target + '号。'
       ]);
     }
     return pickRandom([
@@ -1229,9 +1188,7 @@ function generateAIChatFallback(ai){
     ]);
   }
 
-  /* ============ 狼人 ============ */
   if(ai.role === 'wolf'){
-    // 被怀疑 → 反击
     if(suspected){
       return pickRandom([
         '我不是狼，投我会亏一个轮次。',
@@ -1240,7 +1197,6 @@ function generateAIChatFallback(ai){
         '我是村民，' + target + '号更像是狼。'
       ]);
     }
-    // 有热门怀疑 → 跟风
     if(hot != null){
       return pickRandom([
         '我跟票，' + hot + '号我也觉得有问题。',
@@ -1272,7 +1228,6 @@ function generateAIChatFallback(ai){
     ]);
   }
 
-  /* ============ 女巫 ============ */
   if(ai.role === 'witch'){
     if(isLate){
       return pickRandom([
@@ -1289,7 +1244,6 @@ function generateAIChatFallback(ai){
     ]);
   }
 
-  /* ============ 猎人 ============ */
   if(ai.role === 'hunter'){
     if(suspected){
       return pickRandom([
@@ -1306,7 +1260,6 @@ function generateAIChatFallback(ai){
     ]);
   }
 
-  /* ============ 村民 ============ */
   if(suspected){
     return pickRandom([
       '我村民，投我没意义。',
@@ -1797,13 +1750,41 @@ function confirmWitch(canHeal, canPoison){
   if(canPoison && witchSel.poison === undefined) return;
   act('witch', null, { heal: canHeal ? !!witchSel.heal : false, poison: canPoison ? witchSel.poison : null });
 }
+
+/* ============================================================
+   发送文字消息 - 发送后清空输入框
+   ============================================================ */
 function doChatSend(){
   var ipt = $id('chatIpt');
   if(!ipt) return;
   var text = ipt.value.trim();
   if(!text) return;
-  playerSendChat(text);
+
+  // ① 先记录时间戳（让 render 知道"刚发完，别回填"）
+  chatJustSent = Date.now();
+
+  // ② 立即清空输入框
   ipt.value = '';
+
+  // ③ 保持焦点
+  try { ipt.focus(); } catch(e){}
+
+  // ④ 异步发送（避免同步 render 的干扰）
+  setTimeout(function(){ playerSendChat(text); }, 0);
+
+  // ⑤ 兜底清空两次，防止任何延迟回填
+  setTimeout(function(){
+    var ni = $id('chatIpt');
+    if(ni) ni.value = '';
+  }, 30);
+  setTimeout(function(){
+    var ni = $id('chatIpt');
+    if(ni){ ni.value = ''; ni.focus(); }
+  }, 200);
+
+  // ⑥ 滚动到底部
+  var cb = document.querySelector('.chatbox');
+  if(cb) setTimeout(function(){ cb.scrollTop = cb.scrollHeight; }, 60);
 }
 
 /* ============================================================
@@ -1878,9 +1859,14 @@ setInterval(function(){
    ============================================================ */
 function render(){
   var app = $id('app');
-  var saveIpt = '';
   var oldIpt = $id('chatIpt');
-  if(oldIpt) saveIpt = oldIpt.value;
+  var hadFocus = oldIpt && document.activeElement === oldIpt;
+
+  // 关键：刚发送完 1 秒内，不保存输入框内容（防止旧值回填）
+  var saveIpt = '';
+  if(oldIpt && Date.now() - chatJustSent > 1500){
+    saveIpt = oldIpt.value;
+  }
 
   if(!G){ app.innerHTML = viewEntry(); }
   else {
@@ -1898,10 +1884,15 @@ function render(){
     else if(ph === 'over')   html = viewOver();
     else html = '<div class="center-screen"><div class="spinner"></div></div>';
     app.innerHTML = html;
-  }
-  if(saveIpt){
+
     var ni = $id('chatIpt');
-    if(ni) ni.value = saveIpt;
+    if(ni){
+      if(saveIpt) ni.value = saveIpt;
+      // 刚发完消息也要保持焦点
+      if(hadFocus || Date.now() - chatJustSent < 1500) ni.focus();
+    }
+    var cb = document.querySelector('.chatbox');
+    if(cb) cb.scrollTop = cb.scrollHeight;
   }
 }
 
@@ -1919,8 +1910,8 @@ function viewEntry(){
     '<button class="ghost" onclick="joinRoom()">加 入 房 间</button>' + err +
     '<p class="muted" style="margin-top:26px;font-size:12.5px;line-height:1.9">' +
     '· 房主可添加 AI 一起玩<br>' +
-    '· 有条件可用 AI，没条件用模板发言<br>' +
-    '· 讨论阶段可打字聊天</p>' +
+    '· 打字聊天，发送后自动清空<br>' +
+    '· 有 AI 配置时用真模型，否则用模板发言</p>' +
     viewAISettingsCard();
 }
 
@@ -1935,31 +1926,26 @@ function viewAISettingsCard(){
   else if(AI_DEBUG.lastStatus === 'testing') dbgColor = '#d4af37';
   var dbgLine = '<p style="font-size:11.5px;color:' + dbgColor + ';margin:6px 0;line-height:1.6;word-break:break-all">' +
     '📡 ' + esc(AI_DEBUG.lastMessage) + '<br>' +
-    '成功 ' + AI_DEBUG.okCount + ' 次 / 失败 ' + AI_DEBUG.errCount + ' 次' +
-    '</p>';
+    '成功 ' + AI_DEBUG.okCount + ' 次 / 失败 ' + AI_DEBUG.errCount + ' 次</p>';
 
   var providerOpts = '';
   for(var k in AI_PRESETS){
     providerOpts += '<option value="' + k + '"' + (AI_CONFIG.provider === k ? ' selected' : '') + '>' +
       AI_PRESETS[k].name + '</option>';
   }
-
   var keyBlock = '';
   if(preset.needKey){
     keyBlock = '<input class="ipt" id="aiKeyIpt" type="text" placeholder="粘贴 API Key" value="' + esc(AI_CONFIG.apiKey) + '" style="font-size:12px;letter-spacing:0;margin-bottom:8px" onblur="setAIKey()">';
   }
   var proxyBlock = '';
   if(preset.needProxy){
-    proxyBlock = '<input class="ipt" id="aiProxyIpt" type="text" placeholder="代理地址" ' +
-      'value="' + esc(AI_CONFIG.proxyUrl) + '" style="font-size:12px;letter-spacing:0;margin-bottom:8px" onblur="setAIProxy()">';
+    proxyBlock = '<input class="ipt" id="aiProxyIpt" type="text" placeholder="代理地址" value="' + esc(AI_CONFIG.proxyUrl) + '" style="font-size:12px;letter-spacing:0;margin-bottom:8px" onblur="setAIProxy()">';
   }
-
   return '<div class="aikey-box">' +
     '<div class="status"><span><span class="dot ' + dot + '"></span>' + statusText + '</span>' +
     '<button class="ghost" style="width:auto;padding:6px 12px;font-size:12px" onclick="toggleAI()">' + (AI_CONFIG.enabled ? '禁用' : '启用') + '</button></div>' +
     '<select class="ipt" id="aiProviderSel" style="font-size:13px;letter-spacing:0;margin-bottom:8px" onchange="setAIProvider()">' + providerOpts + '</select>' +
-    keyBlock +
-    proxyBlock +
+    keyBlock + proxyBlock +
     '<button class="primary" style="padding:11px;font-size:14px" onclick="setAIKey()">保存设置</button>' +
     '<button class="ghost" style="padding:11px;font-size:14px;margin-top:8px" onclick="testAIConnection()">🧪 测试连接</button>' +
     dbgLine +
@@ -2206,10 +2192,11 @@ function viewChatBox(){
     return '<div class="chatmsg ' + meCls + '">' + tag + '<b class="' + nameCls + '">' + esc(c.name) + ':</b> ' + esc(c.text) + '</div>';
   }).join('');
   if(!items) items = '<div class="muted" style="font-size:12.5px">暂无发言…</div>';
-  return '<div class="chatbox">' + items + '</div>' +
+
+  return '<div class="chatbox" id="chatBox">' + items + '</div>' +
     '<div class="chatinput">' +
-    '<input id="chatIpt" maxlength="60" placeholder="说点什么…" onkeydown="if(event.key===\'Enter\')doChatSend()">' +
-    '<button class="primary" onclick="doChatSend()">发送</button>' +
+    '<input id="chatIpt" maxlength="60" placeholder="输入消息…" onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();doChatSend();}">' +
+    '<button class="primary send" onclick="doChatSend()">发送</button>' +
     '</div>';
 }
 
