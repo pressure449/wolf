@@ -157,10 +157,10 @@ var witchSel = { heal: undefined, poison: undefined };
 var aiLastSpeak = 0;
 
 var BROKER_URL = 'wss://broker.emqx.io:8084/mqtt';
-var TOPIC_PREFIX = 'wolfchinese-v9/room/';
+var TOPIC_PREFIX = 'wolfchinese-v10/room/';
 
 /* ============================================================
-   AI 配置（默认 Puter.js）
+   AI 配置
    ============================================================ */
 var AI_CONFIG = {
   enabled: false,
@@ -224,7 +224,7 @@ var AI_DEBUG = {
 
 function loadAIConfig(){
   try {
-    var saved = localStorage.getItem('wolf_ai_config_v9');
+    var saved = localStorage.getItem('wolf_ai_config_v10');
     if(saved){
       var obj = JSON.parse(saved);
       AI_CONFIG.enabled = !!obj.enabled;
@@ -239,7 +239,7 @@ function loadAIConfig(){
   }
 }
 function saveAIConfig(){
-  localStorage.setItem('wolf_ai_config_v9', JSON.stringify({
+  localStorage.setItem('wolf_ai_config_v10', JSON.stringify({
     enabled: AI_CONFIG.enabled,
     provider: AI_CONFIG.provider,
     apiKey: AI_CONFIG.apiKey,
@@ -273,7 +273,7 @@ function setNet(on){
 }
 
 /* ============================================================
-   LLM 调用
+   LLM 调用（仅用于发言，投票不走 LLM）
    ============================================================ */
 var llmQueue = [];
 var llmProcessing = false;
@@ -308,14 +308,9 @@ async function processLLMQueue(){
   llmProcessing = false;
 }
 
-/* ============================================================
-   解析 Puter.js 返回
-   ============================================================ */
 function extractPuterReply(response){
   if(response == null) return null;
-  // 字符串
   if(typeof response === 'string') return response;
-  // { message: { content: "..." } }
   if(response.message){
     if(typeof response.message === 'string') return response.message;
     if(response.message.content){
@@ -327,9 +322,7 @@ function extractPuterReply(response){
       }
     }
   }
-  // { text: "..." }
   if(response.text) return response.text;
-  // { content: "..." }
   if(response.content){
     if(typeof response.content === 'string') return response.content;
     if(Array.isArray(response.content)){
@@ -338,7 +331,6 @@ function extractPuterReply(response){
       }).join('');
     }
   }
-  // 数组
   if(Array.isArray(response)){
     return response.map(function(item){
       if(typeof item === 'string') return item;
@@ -347,7 +339,6 @@ function extractPuterReply(response){
       return '';
     }).join('');
   }
-  // 兜底
   try { return JSON.stringify(response); } catch(e){}
   return null;
 }
@@ -402,7 +393,6 @@ async function callLLM(systemPrompt, userPrompt, maxTokens, retryCount){
 
       var replyStr = String(reply).trim();
       var lower = replyStr.toLowerCase();
-      // 识别错误信息
       if(lower.indexOf('error') === 0 || lower.indexOf('failed') === 0 ||
          lower.indexOf('unauthorized') >= 0 || lower.indexOf('rate limit') >= 0 ||
          lower.indexOf('quota') >= 0){
@@ -420,7 +410,6 @@ async function callLLM(systemPrompt, userPrompt, maxTokens, retryCount){
       AI_DEBUG.lastDuration = Date.now() - t0;
       AI_DEBUG.lastStatus = 'error';
       var msg = e.message || String(e);
-      // 首次失败时自动重试一次
       if(retryCount < 1 && (msg.indexOf('network') >= 0 || msg.indexOf('fetch') >= 0 || msg.indexOf('timeout') >= 0)){
         AI_DEBUG.lastMessage = '⏳ Puter 请求失败，5 秒后重试…';
         render();
@@ -434,24 +423,14 @@ async function callLLM(systemPrompt, userPrompt, maxTokens, retryCount){
     }
   }
 
-  /* -------- 其他 provider（OpenAI 兼容） -------- */
+  /* -------- 其他 provider -------- */
   var url, headers, body;
-
   if(AI_CONFIG.provider === 'zhipu'){
     url = AI_CONFIG.proxyUrl;
     headers = {
       'Content-Type': 'application/json',
       'X-Zhipu-Key': AI_CONFIG.apiKey
     };
-    body = JSON.stringify({
-      model: AI_CONFIG.model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
-      max_tokens: maxTokens || 120,
-      temperature: 0.9
-    });
   } else {
     url = preset.endpoint;
     headers = { 'Content-Type': 'application/json' };
@@ -462,16 +441,16 @@ async function callLLM(systemPrompt, userPrompt, maxTokens, retryCount){
       headers['HTTP-Referer'] = location.origin;
       headers['X-Title'] = 'Wolf Game';
     }
-    body = JSON.stringify({
-      model: AI_CONFIG.model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
-      max_tokens: maxTokens || 120,
-      temperature: 0.9
-    });
   }
+  body = JSON.stringify({
+    model: AI_CONFIG.model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ],
+    max_tokens: maxTokens || 120,
+    temperature: 0.9
+  });
 
   var t1 = Date.now();
   var controller = new AbortController();
@@ -510,12 +489,12 @@ async function callLLM(systemPrompt, userPrompt, maxTokens, retryCount){
 
     var data;
     try { data = JSON.parse(text); } catch(e){
-      var lower = text.toLowerCase();
-      var isError = lower.indexOf('error') >= 0 || lower.indexOf('credit') >= 0 ||
-                    lower.indexOf('api key') >= 0 || lower.indexOf('invalid') >= 0 ||
-                    lower.indexOf('unauthorized') >= 0 || lower.indexOf('forbidden') >= 0 ||
-                    lower.indexOf('rate limit') >= 0 || lower.indexOf('quota') >= 0 ||
-                    lower.indexOf('too many') >= 0;
+      var lower2 = text.toLowerCase();
+      var isError = lower2.indexOf('error') >= 0 || lower2.indexOf('credit') >= 0 ||
+                    lower2.indexOf('api key') >= 0 || lower2.indexOf('invalid') >= 0 ||
+                    lower2.indexOf('unauthorized') >= 0 || lower2.indexOf('forbidden') >= 0 ||
+                    lower2.indexOf('rate limit') >= 0 || lower2.indexOf('quota') >= 0 ||
+                    lower2.indexOf('too many') >= 0;
       if(isError){
         AI_DEBUG.lastStatus = 'error';
         AI_DEBUG.lastMessage = '接口报错：' + text.slice(0, 200);
@@ -682,7 +661,7 @@ function createHostState(code, hostName){
     deaths: [], hunterId: null, hunterAfter: null, votes: {}, voteResult: null,
     winner: null, allRoles: null, players: new Map(),
     sheriffId: null, sheriffCandidates: [], sheriffVotes: {}, sheriffReelection: false, sheriffApplied: {},
-    chatLog: []
+    chatLog: [], wolfVoteTarget: null
   };
   s.players.set(1, {
     id: 1, name: hostName, tag: '', role: null,
@@ -864,6 +843,32 @@ function playerSendChat(text){
 }
 
 /* ============================================================
+   从聊天记录提取被怀疑最多的玩家
+   ============================================================ */
+function countSuspicionFromChat(candidates){
+  var counts = {};
+  if(!host.chatLog) return counts;
+  var re1 = /(\d+)\s*号[^，。\n]{0,8}?(狼人|查杀|狼)/g;
+  var re2 = /预言家[^，。\n]{0,20}?(\d+)\s*号/g;
+  for(var i = 0; i < host.chatLog.length; i++){
+    var c = host.chatLog[i];
+    if(c.isAI && !c.fromModel) continue; // 只统计真模型发言或真人发言
+    var m;
+    re1.lastIndex = 0;
+    while((m = re1.exec(c.text)) !== null){
+      var id = parseInt(m[1]);
+      if(candidates.indexOf(id) >= 0) counts[id] = (counts[id] || 0) + 1;
+    }
+    re2.lastIndex = 0;
+    while((m = re2.exec(c.text)) !== null){
+      var id2 = parseInt(m[1]);
+      if(candidates.indexOf(id2) >= 0) counts[id2] = (counts[id2] || 0) + 1;
+    }
+  }
+  return counts;
+}
+
+/* ============================================================
    AI 行动
    ============================================================ */
 function processAIActions(){
@@ -1016,31 +1021,59 @@ function processAIActions(){
     return;
   }
 
+  /* -------- 白天投票：完全规则，不走 LLM -------- */
   if(host.phase === 'vote'){
     for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
       var pl = p.value;
       if(!pl.isAI || !pl.alive) continue;
       if(host.votes[pl.id] != null) continue;
 
-      if(canUseLLM()){
-        aiVoteByLLM(pl);
-        return;
-      }
-
       var vts = [];
       for(var it2 = host.players.values(), q = it2.next(); !q.done; q = it2.next()){
         if(q.value.alive && q.value.id !== pl.id) vts.push(q.value.id);
       }
-      if(!vts.length) return;
-      var suspicion = findSuspicionFromChat(pl, vts);
+      if(!vts.length){ return; }
+
       if(pl.role === 'wolf'){
-        var nonWolves = vts.filter(function(id){ var t = host.players.get(id); return t && t.role !== 'wolf'; });
-        host.votes[pl.id] = nonWolves.length ? pickRandom(nonWolves) : pickRandom(vts);
-      } else if(suspicion){
-        host.votes[pl.id] = suspicion;
+        // 狼人抱团：房主统一选一个好人
+        if(host.wolfVoteTarget == null || vts.indexOf(host.wolfVoteTarget) < 0){
+          var nonWolves = vts.filter(function(id){ var t = host.players.get(id); return t && t.role !== 'wolf'; });
+          host.wolfVoteTarget = nonWolves.length ? pickRandom(nonWolves) : pickRandom(vts);
+        }
+        host.votes[pl.id] = host.wolfVoteTarget;
+      } else if(pl.role === 'seer' && pl.seerChecks && pl.seerChecks.length){
+        // 预言家优先投查到的狼
+        var wolfFound = null;
+        for(var i = 0; i < pl.seerChecks.length; i++){
+          if(pl.seerChecks[i].isWolf && vts.indexOf(pl.seerChecks[i].id) >= 0){
+            wolfFound = pl.seerChecks[i].id; break;
+          }
+        }
+        if(wolfFound){
+          host.votes[pl.id] = wolfFound;
+        } else {
+          // 没有查杀就跟着大家怀疑最多的投
+          var counts = countSuspicionFromChat(vts);
+          var best = null, bestN = 0;
+          for(var k in counts){
+            if(counts[k] > bestN){ bestN = counts[k]; best = parseInt(k); }
+          }
+          host.votes[pl.id] = best != null ? best : pickRandom(vts);
+        }
       } else {
-        host.votes[pl.id] = pickRandom(vts);
+        // 好人 AI：统计聊天记录里被怀疑最多的
+        var counts2 = countSuspicionFromChat(vts);
+        var best2 = null, bestN2 = 0;
+        for(var k in counts2){
+          if(counts2[k] > bestN2){ bestN2 = counts2[k]; best2 = parseInt(k); }
+        }
+        if(best2 != null){
+          host.votes[pl.id] = best2;
+        } else {
+          host.votes[pl.id] = pickRandom(vts);
+        }
       }
+
       var allVoted = true;
       for(var it2 = host.players.values(), q = it2.next(); !q.done; q = it2.next()){
         if(q.value.alive && host.votes[q.value.id] == null){ allVoted = false; break; }
@@ -1107,23 +1140,8 @@ function canUseLLM(){
   return true;
 }
 
-function findSuspicionFromChat(pl, vts){
-  if(!host.chatLog) return null;
-  for(var i = host.chatLog.length - 1; i >= 0; i--){
-    var c = host.chatLog[i];
-    if(c.id === pl.id) continue;
-    var m = c.text.match(/预言家.*?(\d+)\s*号.*?狼/);
-    if(!m) m = c.text.match(/(\d+)\s*号.*?(狼人|查杀)/);
-    if(m){
-      var sid = parseInt(m[1]);
-      if(vts.indexOf(sid) >= 0) return sid;
-    }
-  }
-  return null;
-}
-
 /* ============================================================
-   LLM 发言
+   LLM 发言（带 12 秒超时降级）
    ============================================================ */
 function buildGameContext(ai){
   var alive = [], dead = [];
@@ -1182,7 +1200,15 @@ function aiSpeakByLLM(ai){
     '请你说一句话（严格60字内，不要换行）：';
 
   queueLLM(async function(){
-    var text = await callLLM(system, user, 100);
+    var text = null;
+    try {
+      text = await Promise.race([
+        callLLM(system, user, 100),
+        new Promise(function(resolve){ setTimeout(function(){ resolve(null) }, 12000) })
+      ]);
+    } catch(e){
+      text = null;
+    }
     if(!text){
       text = generateAIChatFallback(ai);
       hostSendChat(ai.id, text, false);
@@ -1190,57 +1216,6 @@ function aiSpeakByLLM(ai){
       text = text.replace(/^["'「『]|["'」』]$/g, '').trim().slice(0, 80);
       hostSendChat(ai.id, text, true);
     }
-  });
-}
-
-/* ============================================================
-   LLM 投票
-   ============================================================ */
-function aiVoteByLLM(ai){
-  var ctx = buildGameContext(ai);
-  var candidates = [];
-  for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
-    if(p.value.alive && p.value.id !== ai.id) candidates.push(p.value.id + '号');
-  }
-  if(!candidates.length) return;
-
-  var system = '你在玩狼人杀。请根据你的身份和场上发言，投票选出你认为最可能是狼人的玩家。' +
-    '如果是狼人，要投一个好人，避免投狼队友。' +
-    '只回答一个数字（玩家编号），例如"3"。不要加任何其他文字。';
-
-  var user = '当前是第' + ctx.day + '天投票阶段。\n' +
-    ctx.myInfo + '\n' +
-    '存活玩家：' + ctx.alive + '\n' +
-    '之前的发言：\n' + (ctx.history || '（还没人发言）') + '\n\n' +
-    '你要投给：' + candidates.join('、') + ' 中的哪一个？只输出数字：';
-
-  queueLLM(async function(){
-    var text = await callLLM(system, user, 10);
-    var targetId = null;
-    if(text){
-      var m = text.match(/\d+/);
-      if(m) targetId = parseInt(m[0]);
-    }
-    if(!targetId || !host.players.get(targetId) || !host.players.get(targetId).alive || targetId === ai.id){
-      var vts = [];
-      for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
-        if(p.value.alive && p.value.id !== ai.id) vts.push(p.value.id);
-      }
-      if(ai.role === 'wolf'){
-        var nw = vts.filter(function(id){ var t = host.players.get(id); return t && t.role !== 'wolf'; });
-        targetId = nw.length ? pickRandom(nw) : pickRandom(vts);
-      } else {
-        targetId = pickRandom(vts);
-      }
-    }
-    if(host.votes[ai.id] != null) return;
-    host.votes[ai.id] = targetId;
-    var allVoted = true;
-    for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
-      if(p.value.alive && host.votes[p.value.id] == null){ allVoted = false; break; }
-    }
-    if(allVoted) applyVote();
-    else broadcastHostState();
   });
 }
 
@@ -1647,6 +1622,7 @@ function hostStartGame(){
   host.votes = {}; host.voteResult = null; host.winner = null; host.allRoles = null;
   host.sheriffId = null; host.sheriffCandidates = []; host.sheriffVotes = {}; host.sheriffReelection = false; host.sheriffApplied = {};
   host.chatLog = [];
+  host.wolfVoteTarget = null;
   aiLastSpeak = 0;
   broadcastHostState();
   setTimeout(function(){ advanceNight(); }, 200);
@@ -1669,6 +1645,7 @@ function hostContinue(){
   }
   if(host.phase === 'discuss'){
     host.phase = 'vote'; host.votes = {}; host.voteResult = null;
+    host.wolfVoteTarget = null;
     broadcastHostState(); return;
   }
   if(host.phase === 'voteResult'){
@@ -1686,6 +1663,7 @@ function hostContinue(){
     }
     host.phase = 'night'; host.day++; host.nightStep = 0; host.night = {};
     host.deaths = []; host.voteResult = null; host.hunterId = null;
+    host.wolfVoteTarget = null;
     broadcastHostState();
     setTimeout(function(){ advanceNight(); }, 200);
     return;
@@ -1700,6 +1678,7 @@ function restartHost(){
   host.votes = {}; host.voteResult = null; host.winner = null; host.allRoles = null;
   host.sheriffId = null; host.sheriffCandidates = []; host.sheriffVotes = {}; host.sheriffReelection = false; host.sheriffApplied = {};
   host.chatLog = [];
+  host.wolfVoteTarget = null;
   aiLastSpeak = 0;
   for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
     p.value.role = null; p.value.alive = true; p.value.seerChecks = [];
