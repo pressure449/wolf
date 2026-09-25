@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="theme-color" content="#0e0e18">
 <link rel="manifest" href="manifest.json">
-<title>狼人杀 · 手机版</title>
+<title>狼人杀 · AI 对战版</title>
+<script src="https://js.puter.com/v2/"></script>
 <style>
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0}
@@ -37,11 +38,13 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .plist{display:flex;flex-direction:column;gap:8px}
 .prow{display:flex;align-items:center;gap:12px;background:#1a1a2b;border:1px solid #26263c;border-radius:13px;padding:13px 16px}
 .prow.off{opacity:.42}
+.prow.ai .avatar{background:linear-gradient(135deg,#5c3a8a,#3a265c);color:#e0c8ff}
 .avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#3a3a5c,#26263c);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#c0c0d8;flex-shrink:0}
 .prow.me .avatar{background:linear-gradient(135deg,#d4af37,#b8860b);color:#1a1408}
 .pname{flex:1;font-size:15px}
 .ptag{font-size:11px;color:#7a7a94;border:1px solid #33334d;padding:2px 8px;border-radius:6px}
 .ptag.host{color:#d4af37;border-color:#5a4a20}
+.ptag.ai{color:#b090e0;border-color:#5a3a8a}
 .phasehead{font-size:19px;font-weight:700;letter-spacing:2px;padding-bottom:4px;border-bottom:1px solid #26263c}
 .statusbar{display:flex;gap:18px;font-size:13.5px;color:#9a9ab5;background:#191928;border-radius:10px;padding:10px 14px}
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:4px}
@@ -97,6 +100,23 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .netstatus{position:fixed;top:8px;right:8px;font-size:11px;padding:3px 8px;border-radius:6px;z-index:99}
 .netstatus.on{color:#8ad0a6;background:rgba(58,139,92,.15)}
 .netstatus.off{color:#e88a8a;background:rgba(176,58,58,.15)}
+.aibtn-row{display:flex;gap:8px;margin-top:8px}
+.aibtn-row button{flex:1}
+.chatbox{background:#13131f;border:1px solid #2e2e48;border-radius:12px;padding:12px;max-height:200px;overflow-y:auto;text-align:left;margin-top:10px}
+.chatmsg{font-size:13px;line-height:1.6;margin:4px 0;color:#c0c0d8;word-break:break-word}
+.chatmsg b{color:#d4af37;font-weight:600}
+.chatmsg .ai-name{color:#b090e0}
+.chatmsg.me b{color:#8ad0a6}
+.chatinput{display:flex;gap:8px;margin-top:8px}
+.chatinput input{flex:1;background:#13131f;border:1px solid #2e2e48;border-radius:10px;padding:11px 14px;color:#e8e8f0;font-size:14px;font-family:inherit;outline:none}
+.chatinput input:focus{border-color:#d4af37}
+.chatinput button{width:auto;padding:11px 20px;font-size:14px;border-radius:10px}
+.aikey-box{background:#1a1a2b;border:1px solid #26263c;border-radius:12px;padding:14px;margin-top:10px;font-size:13px;color:#9a9ab5}
+.aikey-box .status{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.aikey-box .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.aikey-box .dot.on{background:#6cc98c}
+.aikey-box .dot.off{background:#8a8aa0}
+.aikey-box .dot.warn{background:#d4af37}
 </style>
 </head>
 <body>
@@ -106,7 +126,7 @@ button:disabled{opacity:.4;cursor:not-allowed}
 <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <script>
 /* ============================================================
-   角色配置（狼人最多 2 个）
+   角色配置
    ============================================================ */
 var ROLE_INFO = {
   wolf:     { name:'狼人',   team:'wolf', icon:'🐺', desc:'每晚与同伴共同击杀一名玩家。' },
@@ -126,9 +146,6 @@ var ROLE_LIST = {
   12: ['wolf','wolf','seer','witch','hunter','guard','villager','villager','villager','villager','villager','villager']
 };
 
-/* ============================================================
-   全局状态
-   ============================================================ */
 var mqttClient = null;
 var roomTopic = null;
 var myTag = '';
@@ -137,9 +154,100 @@ var host = null;
 var G = null;
 var lastErr = '';
 var witchSel = { heal: undefined, poison: undefined };
+var aiLastSpeak = 0;
 
 var BROKER_URL = 'wss://broker.emqx.io:8084/mqtt';
-var TOPIC_PREFIX = 'wolfchinese-v1/room/';
+var TOPIC_PREFIX = 'wolfchinese-v9/room/';
+
+/* ============================================================
+   AI 配置（默认 Puter.js）
+   ============================================================ */
+var AI_CONFIG = {
+  enabled: false,
+  provider: 'puter',
+  apiKey: '',
+  proxyUrl: '',
+  model: '',
+  maxHistory: 20
+};
+
+var AI_PRESETS = {
+  puter: {
+    name: 'Puter.js（免费无需Key）',
+    model: 'gpt-5-nano',
+    endpoint: '',
+    needProxy: false,
+    needKey: false,
+    format: 'puter',
+    rateLimitMs: 3000,
+    hint: '免费、免 Key、免梯子，浏览器直接调用'
+  },
+  openrouter: {
+    name: 'OpenRouter Llama 3.1',
+    model: 'meta-llama/llama-3.1-8b-instruct:free',
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    needProxy: false,
+    needKey: true,
+    format: 'openai',
+    rateLimitMs: 3000,
+    hint: '每天免费 50 次'
+  },
+  groq: {
+    name: 'Groq Llama 3.1',
+    model: 'llama-3.1-8b-instant',
+    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+    needProxy: false,
+    needKey: true,
+    format: 'openai',
+    rateLimitMs: 1000,
+    hint: '速度最快，需梯子'
+  },
+  zhipu: {
+    name: '智谱 GLM-4-Flash',
+    model: 'glm-4-flash-250414',
+    endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+    needProxy: true,
+    needKey: true,
+    format: 'openai',
+    rateLimitMs: 1000,
+    hint: '免费但需代理绕过 CORS'
+  }
+};
+
+var AI_DEBUG = {
+  lastStatus: 'never',
+  lastMessage: '尚未测试',
+  lastDuration: 0,
+  okCount: 0,
+  errCount: 0
+};
+
+function loadAIConfig(){
+  try {
+    var saved = localStorage.getItem('wolf_ai_config_v9');
+    if(saved){
+      var obj = JSON.parse(saved);
+      AI_CONFIG.enabled = !!obj.enabled;
+      AI_CONFIG.provider = obj.provider || 'puter';
+      AI_CONFIG.apiKey = obj.apiKey || '';
+      AI_CONFIG.proxyUrl = obj.proxyUrl || '';
+      AI_CONFIG.model = obj.model || '';
+    }
+  } catch(e){}
+  if(!AI_CONFIG.model){
+    AI_CONFIG.model = AI_PRESETS[AI_CONFIG.provider].model;
+  }
+}
+function saveAIConfig(){
+  localStorage.setItem('wolf_ai_config_v9', JSON.stringify({
+    enabled: AI_CONFIG.enabled,
+    provider: AI_CONFIG.provider,
+    apiKey: AI_CONFIG.apiKey,
+    proxyUrl: AI_CONFIG.proxyUrl,
+    model: AI_CONFIG.model
+  }));
+}
+loadAIConfig();
 
 /* ============================================================
    工具
@@ -147,6 +255,7 @@ var TOPIC_PREFIX = 'wolfchinese-v1/room/';
 function $id(x){ return document.getElementById(x) }
 function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c] }) }
 function shuffle(a){ for(var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=a[i]; a[i]=a[j]; a[j]=t } return a }
+function pickRandom(a){ return a[Math.floor(Math.random()*a.length)] }
 
 function getPlayerTag(){
   var tag = localStorage.getItem('wolf_player_tag');
@@ -156,7 +265,6 @@ function getPlayerTag(){
   }
   return tag;
 }
-
 function setNet(on){
   var el = $id('net');
   if(!el) return;
@@ -165,18 +273,315 @@ function setNet(on){
 }
 
 /* ============================================================
-   ID 重排（防止出现 8 号）
+   LLM 调用
+   ============================================================ */
+var llmQueue = [];
+var llmProcessing = false;
+var llmLastRequestTime = 0;
+
+function queueLLM(task){
+  llmQueue.push(task);
+  processLLMQueue();
+}
+
+async function processLLMQueue(){
+  if(llmProcessing) return;
+  llmProcessing = true;
+  while(llmQueue.length){
+    var preset = AI_PRESETS[AI_CONFIG.provider];
+    var minGap = (preset && preset.rateLimitMs) ? preset.rateLimitMs : 3000;
+
+    var elapsed = Date.now() - llmLastRequestTime;
+    if(elapsed < minGap){
+      var waitMs = minGap - elapsed;
+      AI_DEBUG.lastMessage = '⏳ 限流等待 ' + Math.ceil(waitMs / 1000) + ' 秒…';
+      render();
+      await new Promise(function(r){ setTimeout(r, waitMs) });
+    }
+
+    var task = llmQueue.shift();
+    try {
+      llmLastRequestTime = Date.now();
+      await task();
+    } catch(e){ console.error('LLM 任务失败', e); }
+  }
+  llmProcessing = false;
+}
+
+/* ============================================================
+   解析 Puter.js 返回
+   ============================================================ */
+function extractPuterReply(response){
+  if(response == null) return null;
+  // 字符串
+  if(typeof response === 'string') return response;
+  // { message: { content: "..." } }
+  if(response.message){
+    if(typeof response.message === 'string') return response.message;
+    if(response.message.content){
+      if(typeof response.message.content === 'string') return response.message.content;
+      if(Array.isArray(response.message.content)){
+        return response.message.content.map(function(p){
+          return p.text || p.content || '';
+        }).join('');
+      }
+    }
+  }
+  // { text: "..." }
+  if(response.text) return response.text;
+  // { content: "..." }
+  if(response.content){
+    if(typeof response.content === 'string') return response.content;
+    if(Array.isArray(response.content)){
+      return response.content.map(function(p){
+        return p.text || p.content || '';
+      }).join('');
+    }
+  }
+  // 数组
+  if(Array.isArray(response)){
+    return response.map(function(item){
+      if(typeof item === 'string') return item;
+      if(item && item.text) return item.text;
+      if(item && item.content) return item.content;
+      return '';
+    }).join('');
+  }
+  // 兜底
+  try { return JSON.stringify(response); } catch(e){}
+  return null;
+}
+
+async function callLLM(systemPrompt, userPrompt, maxTokens, retryCount){
+  retryCount = retryCount || 0;
+  if(!AI_CONFIG.enabled){
+    AI_DEBUG.lastStatus = 'disabled';
+    AI_DEBUG.lastMessage = '未启用';
+    return null;
+  }
+  var preset = AI_PRESETS[AI_CONFIG.provider];
+  if(preset.needKey && !AI_CONFIG.apiKey){
+    AI_DEBUG.lastStatus = 'error';
+    AI_DEBUG.lastMessage = '未填 API Key';
+    AI_DEBUG.errCount++;
+    return null;
+  }
+  if(preset.needProxy && !AI_CONFIG.proxyUrl){
+    AI_DEBUG.lastStatus = 'error';
+    AI_DEBUG.lastMessage = '需要代理地址';
+    AI_DEBUG.errCount++;
+    return null;
+  }
+
+  /* -------- Puter.js -------- */
+  if(AI_CONFIG.provider === 'puter'){
+    if(typeof puter === 'undefined' || !puter.ai){
+      AI_DEBUG.lastStatus = 'error';
+      AI_DEBUG.lastMessage = 'Puter.js 未加载（请检查网络）';
+      AI_DEBUG.errCount++;
+      return null;
+    }
+    var t0 = Date.now();
+    try {
+      var response = await puter.ai.chat(
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        { model: AI_CONFIG.model }
+      );
+      AI_DEBUG.lastDuration = Date.now() - t0;
+      var reply = extractPuterReply(response);
+
+      if(!reply || String(reply).trim().length === 0){
+        AI_DEBUG.lastStatus = 'error';
+        AI_DEBUG.lastMessage = 'Puter 返回空内容';
+        AI_DEBUG.errCount++;
+        return null;
+      }
+
+      var replyStr = String(reply).trim();
+      var lower = replyStr.toLowerCase();
+      // 识别错误信息
+      if(lower.indexOf('error') === 0 || lower.indexOf('failed') === 0 ||
+         lower.indexOf('unauthorized') >= 0 || lower.indexOf('rate limit') >= 0 ||
+         lower.indexOf('quota') >= 0){
+        AI_DEBUG.lastStatus = 'error';
+        AI_DEBUG.lastMessage = 'Puter 报错：' + replyStr.slice(0, 150);
+        AI_DEBUG.errCount++;
+        return null;
+      }
+
+      AI_DEBUG.lastStatus = 'ok';
+      AI_DEBUG.lastMessage = '正常，耗时 ' + AI_DEBUG.lastDuration + 'ms';
+      AI_DEBUG.okCount++;
+      return replyStr;
+    } catch(e){
+      AI_DEBUG.lastDuration = Date.now() - t0;
+      AI_DEBUG.lastStatus = 'error';
+      var msg = e.message || String(e);
+      // 首次失败时自动重试一次
+      if(retryCount < 1 && (msg.indexOf('network') >= 0 || msg.indexOf('fetch') >= 0 || msg.indexOf('timeout') >= 0)){
+        AI_DEBUG.lastMessage = '⏳ Puter 请求失败，5 秒后重试…';
+        render();
+        await new Promise(function(r){ setTimeout(r, 5000) });
+        return callLLM(systemPrompt, userPrompt, maxTokens, retryCount + 1);
+      }
+      AI_DEBUG.lastMessage = 'Puter 异常：' + msg.slice(0, 150);
+      AI_DEBUG.errCount++;
+      console.error('Puter 异常', e);
+      return null;
+    }
+  }
+
+  /* -------- 其他 provider（OpenAI 兼容） -------- */
+  var url, headers, body;
+
+  if(AI_CONFIG.provider === 'zhipu'){
+    url = AI_CONFIG.proxyUrl;
+    headers = {
+      'Content-Type': 'application/json',
+      'X-Zhipu-Key': AI_CONFIG.apiKey
+    };
+    body = JSON.stringify({
+      model: AI_CONFIG.model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      max_tokens: maxTokens || 120,
+      temperature: 0.9
+    });
+  } else {
+    url = preset.endpoint;
+    headers = { 'Content-Type': 'application/json' };
+    if(preset.needKey){
+      headers['Authorization'] = 'Bearer ' + AI_CONFIG.apiKey;
+    }
+    if(AI_CONFIG.provider === 'openrouter'){
+      headers['HTTP-Referer'] = location.origin;
+      headers['X-Title'] = 'Wolf Game';
+    }
+    body = JSON.stringify({
+      model: AI_CONFIG.model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      max_tokens: maxTokens || 120,
+      temperature: 0.9
+    });
+  }
+
+  var t1 = Date.now();
+  var controller = new AbortController();
+  var timeoutId = setTimeout(function(){ controller.abort() }, 30000);
+
+  try {
+    var res = await fetch(url, {
+      method: 'POST',
+      headers: headers,
+      body: body,
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    AI_DEBUG.lastDuration = Date.now() - t1;
+    var text = await res.text();
+
+    if(res.status === 429){
+      if(retryCount < 1){
+        AI_DEBUG.lastMessage = '⏳ 上游限流，10 秒后重试…';
+        render();
+        await new Promise(function(r){ setTimeout(r, 10000) });
+        return callLLM(systemPrompt, userPrompt, maxTokens, retryCount + 1);
+      }
+      AI_DEBUG.lastStatus = 'error';
+      AI_DEBUG.lastMessage = 'HTTP 429 限流';
+      AI_DEBUG.errCount++;
+      return null;
+    }
+
+    if(res.status !== 200){
+      AI_DEBUG.lastStatus = 'error';
+      AI_DEBUG.lastMessage = 'HTTP ' + res.status + '：' + text.slice(0, 150);
+      AI_DEBUG.errCount++;
+      return null;
+    }
+
+    var data;
+    try { data = JSON.parse(text); } catch(e){
+      var lower = text.toLowerCase();
+      var isError = lower.indexOf('error') >= 0 || lower.indexOf('credit') >= 0 ||
+                    lower.indexOf('api key') >= 0 || lower.indexOf('invalid') >= 0 ||
+                    lower.indexOf('unauthorized') >= 0 || lower.indexOf('forbidden') >= 0 ||
+                    lower.indexOf('rate limit') >= 0 || lower.indexOf('quota') >= 0 ||
+                    lower.indexOf('too many') >= 0;
+      if(isError){
+        AI_DEBUG.lastStatus = 'error';
+        AI_DEBUG.lastMessage = '接口报错：' + text.slice(0, 200);
+        AI_DEBUG.errCount++;
+        return null;
+      }
+      if(text && text.trim().length > 0 && text.length < 500){
+        AI_DEBUG.lastStatus = 'ok';
+        AI_DEBUG.lastMessage = '正常（纯文本），耗时 ' + AI_DEBUG.lastDuration + 'ms';
+        AI_DEBUG.okCount++;
+        return text.trim();
+      }
+      AI_DEBUG.lastStatus = 'error';
+      AI_DEBUG.lastMessage = '返回非 JSON';
+      AI_DEBUG.errCount++;
+      return null;
+    }
+
+    if(data.error){
+      AI_DEBUG.lastStatus = 'error';
+      AI_DEBUG.lastMessage = 'API 报错：' + JSON.stringify(data.error).slice(0, 180);
+      AI_DEBUG.errCount++;
+      return null;
+    }
+
+    var reply2 = null;
+    if(data.choices && data.choices[0] && data.choices[0].message){
+      reply2 = data.choices[0].message.content;
+    } else if(typeof data === 'string'){
+      reply2 = data;
+    } else if(data.reply){
+      reply2 = data.reply;
+    }
+
+    if(reply2){
+      AI_DEBUG.lastStatus = 'ok';
+      AI_DEBUG.lastMessage = '正常，耗时 ' + AI_DEBUG.lastDuration + 'ms';
+      AI_DEBUG.okCount++;
+      return String(reply2).trim();
+    }
+
+    AI_DEBUG.lastStatus = 'error';
+    AI_DEBUG.lastMessage = '返回格式异常';
+    AI_DEBUG.errCount++;
+    return null;
+  } catch(e){
+    clearTimeout(timeoutId);
+    AI_DEBUG.lastDuration = Date.now() - t1;
+    AI_DEBUG.lastStatus = 'error';
+    var msg2 = e.message || String(e);
+    if(e.name === 'AbortError'){ msg2 = '请求超时（30 秒）'; }
+    else if(msg2.indexOf('Failed to fetch') >= 0){ msg2 = '网络失败（CORS 或不可达）'; }
+    AI_DEBUG.lastMessage = msg2;
+    AI_DEBUG.errCount++;
+    return null;
+  }
+}
+
+/* ============================================================
+   ID 重排
    ============================================================ */
 function reindexPlayers(host){
   var ids = [];
-  for(var it = host.players.keys(), p = it.next(); !p.done; p = it.next()){
-    ids.push(p.value);
-  }
+  for(var it = host.players.keys(), p = it.next(); !p.done; p = it.next()){ ids.push(p.value); }
   ids.sort(function(a,b){ return a - b });
-
-  var idMap = {};
-  var newPlayers = new Map();
-  var i = 1;
+  var idMap = {}, newPlayers = new Map(), i = 1;
   ids.forEach(function(oldId){
     idMap[oldId] = i;
     var player = host.players.get(oldId);
@@ -186,25 +591,19 @@ function reindexPlayers(host){
   });
   host.players = newPlayers;
   host.nextId = i;
-
   var newVotes = {};
   for(var k in host.votes){
-    var nk = idMap[Number(k)];
-    var nv = idMap[host.votes[k]];
+    var nk = idMap[Number(k)], nv = idMap[host.votes[k]];
     if(nk !== undefined && nv !== undefined) newVotes[nk] = nv;
   }
   host.votes = newVotes;
-
   var newSV = {};
   for(var k in host.sheriffVotes){
-    var nk = idMap[Number(k)];
-    var nv = idMap[host.sheriffVotes[k]];
+    var nk = idMap[Number(k)], nv = idMap[host.sheriffVotes[k]];
     if(nk !== undefined && nv !== undefined) newSV[nk] = nv;
   }
   host.sheriffVotes = newSV;
-
   host.sheriffCandidates = host.sheriffCandidates.map(function(id){ return idMap[id] }).filter(function(x){ return x !== undefined });
-
   if(host.sheriffId != null) host.sheriffId = idMap[host.sheriffId];
   if(host.hunterId != null) host.hunterId = idMap[host.hunterId];
   if(host.night.wolfTarget != null) host.night.wolfTarget = idMap[host.night.wolfTarget];
@@ -212,13 +611,8 @@ function reindexPlayers(host){
   if(host.night.guardTarget != null) host.night.guardTarget = idMap[host.night.guardTarget];
   if(host.night.poison != null) host.night.poison = idMap[host.night.poison];
   if(host.lastGuard != null) host.lastGuard = idMap[host.lastGuard];
-
   host.deaths.forEach(function(d){ d.id = idMap[d.id] });
-
-  if(host.allRoles){
-    host.allRoles.forEach(function(r){ r.id = idMap[r.id] });
-  }
-
+  if(host.allRoles){ host.allRoles.forEach(function(r){ r.id = idMap[r.id] }) }
   var newSA = {};
   for(var k in host.sheriffApplied){
     var nk = idMap[Number(k)];
@@ -228,7 +622,7 @@ function reindexPlayers(host){
 }
 
 /* ============================================================
-   房主：创建房间
+   房主
    ============================================================ */
 function createRoom(){
   var name = ($id('nameIpt') && $id('nameIpt').value.trim()) || '玩家';
@@ -246,11 +640,8 @@ function connectAsHost(name){
 
   var clientId = 'wolf_host_' + code + '_' + Math.random().toString(36).slice(2, 8);
   mqttClient = mqtt.connect(BROKER_URL, {
-    clientId: clientId,
-    clean: true,
-    reconnectPeriod: 2000,
-    connectTimeout: 15000,
-    keepalive: 30
+    clientId: clientId, clean: true, reconnectPeriod: 2000,
+    connectTimeout: 15000, keepalive: 30
   });
 
   var ready = false;
@@ -259,9 +650,7 @@ function connectAsHost(name){
   }, 20000);
 
   mqttClient.on('connect', function(){
-    ready = true;
-    clearTimeout(t);
-    setNet(true);
+    ready = true; clearTimeout(t); setNet(true);
     mqttClient.subscribe(roomTopic, { qos: 1 }, function(err){
       if(err){ lastErr = '订阅失败'; render(); return; }
       if(!host){
@@ -292,7 +681,8 @@ function createHostState(code, hostName){
     night: {}, lastGuard: null, witchHealUsed: false, witchPoisonUsed: false,
     deaths: [], hunterId: null, hunterAfter: null, votes: {}, voteResult: null,
     winner: null, allRoles: null, players: new Map(),
-    sheriffId: null, sheriffCandidates: [], sheriffVotes: {}, sheriffReelection: false, sheriffApplied: {}
+    sheriffId: null, sheriffCandidates: [], sheriffVotes: {}, sheriffReelection: false, sheriffApplied: {},
+    chatLog: []
   };
   s.players.set(1, {
     id: 1, name: hostName, tag: '', role: null,
@@ -309,12 +699,10 @@ function handleClientMessage(msg){
     for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
       if(p.value.tag === msg.from){ existingPlayer = p.value; break; }
     }
-
     if(host.phase !== 'lobby' && !existingPlayer){
       publishTo(msg.from, { type: 'error', msg: '游戏已开始，无法加入' });
       return;
     }
-
     if(existingPlayer){
       existingPlayer.name = (msg.name || existingPlayer.name).slice(0, 8);
       existingPlayer.connected = true;
@@ -322,7 +710,6 @@ function handleClientMessage(msg){
       broadcastHostState();
       return;
     }
-
     if(host.players.size >= 12){
       publishTo(msg.from, { type: 'error', msg: '房间已满' });
       return;
@@ -346,16 +733,17 @@ function handleClientMessage(msg){
       if(host.phase === 'sheriffVote' && host.sheriffVotes[found.id] !== undefined) delete host.sheriffVotes[found.id];
       reindexPlayers(host);
       if(host.phase !== 'lobby' && host.phase !== 'over'){
-        if(checkWin()){
-          host.phase = 'over';
-          host.allRoles = [];
-          for(var it2 = host.players.values(), p2 = it2.next(); !p2.done; p2 = it2.next()){
-            host.allRoles.push({ id:p2.value.id, role:p2.value.role, alive:p2.value.alive });
-          }
-        }
+        if(checkWin()) endGame();
       }
       broadcastHostState();
     }
+  }
+  else if(msg.type === 'chat'){
+    var pl = null;
+    for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+      if(p.value.tag === msg.from){ pl = p.value; break; }
+    }
+    if(pl) hostSendChat(pl.id, msg.text, false);
   }
   else if(msg.type === 'action'){
     var player = null;
@@ -377,7 +765,7 @@ function broadcastHostState(){
   if(!host || !mqttClient) return;
   for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
     var pl = p.value;
-    if(pl.id === 1) continue;
+    if(pl.id === 1 || pl.isAI) continue;
     publishTo(pl.tag, { type: 'update', state: buildHostViewFor(pl) });
   }
   G = buildHostViewFor(host.players.get(1));
@@ -388,7 +776,10 @@ function buildHostViewFor(player){
   var playersArr = [];
   for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
     var pl = p.value;
-    playersArr.push({ id: pl.id, name: pl.name, connected: pl.connected, alive: pl.alive, isSheriff: pl.id === host.sheriffId });
+    playersArr.push({
+      id: pl.id, name: pl.name, connected: pl.connected, alive: pl.alive,
+      isSheriff: pl.id === host.sheriffId, isAI: !!pl.isAI
+    });
   }
   return {
     code: host.code, hostId: host.hostId, players: playersArr,
@@ -402,12 +793,493 @@ function buildHostViewFor(player){
     winner: host.winner, allRoles: host.allRoles,
     sheriffId: host.sheriffId, sheriffReelection: host.sheriffReelection,
     sheriffApplied: host.sheriffApplied, sheriffCandidates: host.sheriffCandidates,
+    chatLog: host.chatLog.slice(-30),
     prompt: buildPromptFor(player)
   };
 }
 
 /* ============================================================
-   客户端：加入房间
+   AI 管理
+   ============================================================ */
+function hostAddAI(){
+  if(!isHost || !host) return;
+  if(host.phase !== 'lobby') return;
+  if(host.players.size >= 12) return;
+  var id = host.nextId++;
+  var aiCount = 0;
+  for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+    if(p.value.isAI) aiCount++;
+  }
+  host.players.set(id, {
+    id: id, name: 'AI-' + (aiCount + 1), tag: 'ai_' + id + '_' + Math.random().toString(36).slice(2,6),
+    isAI: true, role: null, alive: true, connected: true, seerChecks: []
+  });
+  broadcastHostState();
+}
+
+function hostRemoveAI(){
+  if(!isHost || !host) return;
+  if(host.phase !== 'lobby') return;
+  var lastAI = null;
+  for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+    if(p.value.isAI) lastAI = p.value;
+  }
+  if(lastAI){
+    host.players.delete(lastAI.id);
+    reindexPlayers(host);
+    broadcastHostState();
+  }
+}
+
+/* ============================================================
+   聊天
+   ============================================================ */
+function hostSendChat(playerId, text, fromModel){
+  if(!host) return;
+  text = String(text || '').trim().slice(0, 100);
+  if(!text) return;
+  var p = host.players.get(playerId);
+  if(!p) return;
+  if(!host.chatLog) host.chatLog = [];
+  host.chatLog.push({
+    id: playerId, name: p.name, isAI: !!p.isAI,
+    fromModel: !!fromModel, text: text, time: Date.now()
+  });
+  if(host.chatLog.length > 60) host.chatLog.shift();
+  broadcastHostState();
+}
+
+function playerSendChat(text){
+  text = String(text || '').trim();
+  if(!text) return;
+  if(isHost){
+    hostSendChat(1, text, false);
+  } else {
+    if(mqttClient && mqttClient.connected && roomTopic){
+      mqttClient.publish(roomTopic, JSON.stringify({
+        to: 'host', from: myTag, type: 'chat', text: text
+      }), { qos: 1 });
+    }
+  }
+}
+
+/* ============================================================
+   AI 行动
+   ============================================================ */
+function processAIActions(){
+  if(!host || !isHost) return;
+
+  if(host.phase === 'night'){
+    var step = host.nightStep;
+
+    function roleAlive(r){
+      for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+        if(p.value.alive && p.value.role === r) return true;
+      }
+      return false;
+    }
+    if(step === 0 && !roleAlive('guard')){ host.nightStep = 1; broadcastHostState(); return; }
+    if(step === 1 && !roleAlive('wolf')){ host.nightStep = 2; broadcastHostState(); return; }
+    if(step === 2 && !roleAlive('witch')){ host.nightStep = 3; broadcastHostState(); return; }
+    if(step === 3 && !roleAlive('seer')){ resolveNight(); return; }
+
+    if(step === 0){
+      for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+        var pl = p.value;
+        if(!pl.isAI || !pl.alive || pl.role !== 'guard') continue;
+        if(host.night.guardTarget !== undefined) continue;
+        var gts = [];
+        for(var it2 = host.players.values(), q = it2.next(); !q.done; q = it2.next()){
+          if(q.value.alive && q.value.id !== host.lastGuard && q.value.id !== pl.id) gts.push(q.value.id);
+        }
+        host.night.guardTarget = gts.length ? pickRandom(gts) : null;
+        advanceNight(); return;
+      }
+      return;
+    }
+
+    if(step === 1){
+      for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+        var pl = p.value;
+        if(!pl.isAI || !pl.alive || pl.role !== 'wolf') continue;
+        if(host.night.wolfTarget !== undefined) continue;
+        var wts = [];
+        for(var it2 = host.players.values(), q = it2.next(); !q.done; q = it2.next()){
+          if(q.value.alive && q.value.role !== 'wolf') wts.push(q.value.id);
+        }
+        host.night.wolfTarget = wts.length ? pickRandom(wts) : null;
+        advanceNight(); return;
+      }
+      return;
+    }
+
+    if(step === 2){
+      for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+        var pl = p.value;
+        if(!pl.isAI || !pl.alive || pl.role !== 'witch') continue;
+        if(host.night.witchDone) continue;
+        var canHeal = !host.witchHealUsed && host.night.wolfTarget != null;
+        var canPoison = !host.witchPoisonUsed;
+        if(canHeal && Math.random() < 0.5){
+          host.night.heal = true; host.witchHealUsed = true;
+        } else if(canPoison && Math.random() < 0.35){
+          var pts = [];
+          for(var it2 = host.players.values(), q = it2.next(); !q.done; q = it2.next()){
+            if(q.value.alive && q.value.id !== pl.id) pts.push(q.value.id);
+          }
+          if(pts.length){ host.night.poison = pickRandom(pts); host.witchPoisonUsed = true; }
+        }
+        host.night.witchDone = true;
+        advanceNight(); return;
+      }
+      return;
+    }
+
+    if(step === 3){
+      for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+        var pl = p.value;
+        if(!pl.isAI || !pl.alive || pl.role !== 'seer') continue;
+        if(host.night.seerTarget != null) continue;
+        var choices = [];
+        for(var it2 = host.players.values(), q = it2.next(); !q.done; q = it2.next()){
+          if(q.value.alive && q.value.id !== pl.id && !pl.seerChecks.some(function(c){ return c.id === q.value.id })) choices.push(q.value.id);
+        }
+        if(!choices.length){
+          for(var it2 = host.players.values(), q = it2.next(); !q.done; q = it2.next()){
+            if(q.value.alive && q.value.id !== pl.id) choices.push(q.value.id);
+          }
+        }
+        if(choices.length){
+          var pickId = pickRandom(choices);
+          host.night.seerTarget = pickId;
+          var t = host.players.get(pickId);
+          if(t && !pl.seerChecks.some(function(c){ return c.id === t.id })){
+            pl.seerChecks.push({ id: t.id, isWolf: t.role === 'wolf' });
+          }
+        }
+        host.night.seerDone = true;
+        advanceNight(); return;
+      }
+      return;
+    }
+    return;
+  }
+
+  if(host.phase === 'sheriffApply'){
+    for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+      var pl = p.value;
+      if(!pl.isAI || !pl.alive) continue;
+      if(host.sheriffApplied[pl.id]) continue;
+      host.sheriffApplied[pl.id] = true;
+      var shouldApply = false;
+      if(pl.role === 'seer') shouldApply = true;
+      else if(pl.role === 'wolf') shouldApply = Math.random() < 0.7;
+      else shouldApply = Math.random() < 0.25;
+      if(shouldApply) host.sheriffCandidates.push(pl.id);
+
+      var allApplied = true;
+      for(var it2 = host.players.values(), q = it2.next(); !q.done; q = it2.next()){
+        if(q.value.alive && !host.sheriffApplied[q.value.id]){ allApplied = false; break; }
+      }
+      if(allApplied){
+        if(host.sheriffCandidates.length === 0) host.phase = 'discuss';
+        else if(host.sheriffCandidates.length === 1){
+          host.sheriffId = host.sheriffCandidates[0]; host.phase = 'sheriffResult';
+        } else {
+          host.phase = 'sheriffVote'; host.sheriffVotes = {};
+        }
+      }
+      broadcastHostState(); return;
+    }
+    return;
+  }
+
+  if(host.phase === 'sheriffVote'){
+    for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+      var pl = p.value;
+      if(!pl.isAI || !pl.alive) continue;
+      if(host.sheriffVotes[pl.id] != null) continue;
+      var choices = host.sheriffCandidates.slice();
+      if(pl.role === 'wolf'){
+        var wolfCand = choices.filter(function(id){ var t = host.players.get(id); return t && t.role === 'wolf' && id !== pl.id; });
+        if(wolfCand.length) choices = wolfCand;
+      }
+      host.sheriffVotes[pl.id] = choices.length ? pickRandom(choices) : pl.id;
+      var allVoted = true;
+      for(var it2 = host.players.values(), q = it2.next(); !q.done; q = it2.next()){
+        if(q.value.alive && host.sheriffVotes[q.value.id] == null){ allVoted = false; break; }
+      }
+      if(allVoted) applySheriffVote();
+      else broadcastHostState();
+      return;
+    }
+    return;
+  }
+
+  if(host.phase === 'vote'){
+    for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+      var pl = p.value;
+      if(!pl.isAI || !pl.alive) continue;
+      if(host.votes[pl.id] != null) continue;
+
+      if(canUseLLM()){
+        aiVoteByLLM(pl);
+        return;
+      }
+
+      var vts = [];
+      for(var it2 = host.players.values(), q = it2.next(); !q.done; q = it2.next()){
+        if(q.value.alive && q.value.id !== pl.id) vts.push(q.value.id);
+      }
+      if(!vts.length) return;
+      var suspicion = findSuspicionFromChat(pl, vts);
+      if(pl.role === 'wolf'){
+        var nonWolves = vts.filter(function(id){ var t = host.players.get(id); return t && t.role !== 'wolf'; });
+        host.votes[pl.id] = nonWolves.length ? pickRandom(nonWolves) : pickRandom(vts);
+      } else if(suspicion){
+        host.votes[pl.id] = suspicion;
+      } else {
+        host.votes[pl.id] = pickRandom(vts);
+      }
+      var allVoted = true;
+      for(var it2 = host.players.values(), q = it2.next(); !q.done; q = it2.next()){
+        if(q.value.alive && host.votes[q.value.id] == null){ allVoted = false; break; }
+      }
+      if(allVoted) applyVote();
+      else broadcastHostState();
+      return;
+    }
+    return;
+  }
+
+  if(host.phase === 'hunter' && host.hunterId){
+    var h = host.players.get(host.hunterId);
+    if(h && h.isAI && h.alive === false){
+      var hts = [];
+      for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+        if(p.value.alive && p.value.id !== h.id) hts.push(p.value.id);
+      }
+      if(hts.length && Math.random() < 0.85){
+        var t = host.players.get(pickRandom(hts));
+        if(t) t.alive = false;
+      }
+      if(checkWin()){ endGame(); return; }
+      if(host.hunterAfter === 'night'){
+        host.phase = 'night'; host.day++; host.nightStep = 0; host.night = {};
+        host.deaths = []; host.hunterId = null;
+      } else { host.phase = 'discuss'; }
+      broadcastHostState();
+      return;
+    }
+    return;
+  }
+
+  if(host.phase === 'discuss'){
+    var now = Date.now();
+    if(now - aiLastSpeak < 10000) return;
+    var ais = [];
+    for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+      if(p.value.isAI && p.value.alive) ais.push(p.value);
+    }
+    if(!ais.length) return;
+    var ai = pickRandom(ais);
+
+    if(canUseLLM()){
+      aiSpeakByLLM(ai);
+      aiLastSpeak = now;
+    } else {
+      var text = generateAIChatFallback(ai);
+      if(text){
+        hostSendChat(ai.id, text, false);
+        aiLastSpeak = now;
+      }
+    }
+    return;
+  }
+}
+
+function canUseLLM(){
+  if(!AI_CONFIG.enabled) return false;
+  var preset = AI_PRESETS[AI_CONFIG.provider];
+  if(!preset) return false;
+  if(preset.needKey && !AI_CONFIG.apiKey) return false;
+  if(preset.needProxy && !AI_CONFIG.proxyUrl) return false;
+  return true;
+}
+
+function findSuspicionFromChat(pl, vts){
+  if(!host.chatLog) return null;
+  for(var i = host.chatLog.length - 1; i >= 0; i--){
+    var c = host.chatLog[i];
+    if(c.id === pl.id) continue;
+    var m = c.text.match(/预言家.*?(\d+)\s*号.*?狼/);
+    if(!m) m = c.text.match(/(\d+)\s*号.*?(狼人|查杀)/);
+    if(m){
+      var sid = parseInt(m[1]);
+      if(vts.indexOf(sid) >= 0) return sid;
+    }
+  }
+  return null;
+}
+
+/* ============================================================
+   LLM 发言
+   ============================================================ */
+function buildGameContext(ai){
+  var alive = [], dead = [];
+  for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+    var pl = p.value;
+    if(pl.alive) alive.push(pl.id + '号');
+    else dead.push(pl.id + '号');
+  }
+  var history = '';
+  if(host.chatLog){
+    history = host.chatLog.slice(-15).map(function(c){
+      return c.name + ': ' + c.text;
+    }).join('\n');
+  }
+  var myInfo = '你的身份：' + (ROLE_INFO[ai.role] ? ROLE_INFO[ai.role].name : '?');
+  if(ai.role === 'wolf'){
+    var mates = [];
+    for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+      if(p.value.role === 'wolf' && p.value.id !== ai.id) mates.push(p.value.id + '号');
+    }
+    myInfo += '；狼队友：' + (mates.join('、') || '无');
+  }
+  if(ai.role === 'seer' && ai.seerChecks && ai.seerChecks.length){
+    myInfo += '；查验记录：' + ai.seerChecks.map(function(c){
+      return c.id + '号=' + (c.isWolf ? '狼人' : '好人');
+    }).join('，');
+  }
+  return {
+    day: host.day,
+    alive: alive.join('、'),
+    dead: dead.join('、') || '无',
+    myInfo: myInfo,
+    history: history,
+    totalPlayers: host.players.size
+  };
+}
+
+function aiSpeakByLLM(ai){
+  var ctx = buildGameContext(ai);
+  var system = '你是一个正在玩狼人杀的中国玩家，昵称"' + ai.name + '"，身份是【' +
+    (ROLE_INFO[ai.role] ? ROLE_INFO[ai.role].name : '?') + '】。' +
+    '请像真实玩家一样用中文发言，口语化，1-2句话，不超过60字。' +
+    '关键规则：' +
+    '1. 只根据「之前发言」中有明确依据的内容怀疑别人，不要凭空乱说；' +
+    '2. 如果之前没有人提到过某个玩家，就不要突然说"我觉得X号很奇怪"；' +
+    '3. 如果你是预言家，报查验结果；如果你是狼人，可以伪装或泼脏水；' +
+    '4. 如果你是村民，可以表达自己的判断，但不要总怀疑别人；' +
+    '5. 如果实在没什么可说，就说"我暂时不发表意见，听大家发言"或"我过"之类的话；' +
+    '6. 只输出你说的话本身，不要加引号、括号、前缀或任何解释。';
+
+  var user = '当前是第' + ctx.day + '天讨论阶段。\n' +
+    ctx.myInfo + '\n' +
+    '存活玩家：' + ctx.alive + '\n' +
+    '已出局：' + ctx.dead + '\n' +
+    '之前的发言：\n' + (ctx.history || '（还没有人发言）') + '\n\n' +
+    '请你说一句话（严格60字内，不要换行）：';
+
+  queueLLM(async function(){
+    var text = await callLLM(system, user, 100);
+    if(!text){
+      text = generateAIChatFallback(ai);
+      hostSendChat(ai.id, text, false);
+    } else {
+      text = text.replace(/^["'「『]|["'」』]$/g, '').trim().slice(0, 80);
+      hostSendChat(ai.id, text, true);
+    }
+  });
+}
+
+/* ============================================================
+   LLM 投票
+   ============================================================ */
+function aiVoteByLLM(ai){
+  var ctx = buildGameContext(ai);
+  var candidates = [];
+  for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+    if(p.value.alive && p.value.id !== ai.id) candidates.push(p.value.id + '号');
+  }
+  if(!candidates.length) return;
+
+  var system = '你在玩狼人杀。请根据你的身份和场上发言，投票选出你认为最可能是狼人的玩家。' +
+    '如果是狼人，要投一个好人，避免投狼队友。' +
+    '只回答一个数字（玩家编号），例如"3"。不要加任何其他文字。';
+
+  var user = '当前是第' + ctx.day + '天投票阶段。\n' +
+    ctx.myInfo + '\n' +
+    '存活玩家：' + ctx.alive + '\n' +
+    '之前的发言：\n' + (ctx.history || '（还没人发言）') + '\n\n' +
+    '你要投给：' + candidates.join('、') + ' 中的哪一个？只输出数字：';
+
+  queueLLM(async function(){
+    var text = await callLLM(system, user, 10);
+    var targetId = null;
+    if(text){
+      var m = text.match(/\d+/);
+      if(m) targetId = parseInt(m[0]);
+    }
+    if(!targetId || !host.players.get(targetId) || !host.players.get(targetId).alive || targetId === ai.id){
+      var vts = [];
+      for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+        if(p.value.alive && p.value.id !== ai.id) vts.push(p.value.id);
+      }
+      if(ai.role === 'wolf'){
+        var nw = vts.filter(function(id){ var t = host.players.get(id); return t && t.role !== 'wolf'; });
+        targetId = nw.length ? pickRandom(nw) : pickRandom(vts);
+      } else {
+        targetId = pickRandom(vts);
+      }
+    }
+    if(host.votes[ai.id] != null) return;
+    host.votes[ai.id] = targetId;
+    var allVoted = true;
+    for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+      if(p.value.alive && host.votes[p.value.id] == null){ allVoted = false; break; }
+    }
+    if(allVoted) applyVote();
+    else broadcastHostState();
+  });
+}
+
+/* ============================================================
+   降级模板
+   ============================================================ */
+function generateAIChatFallback(ai){
+  var alive = [];
+  for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+    if(p.value.alive && p.value.id !== ai.id) alive.push(p.value.id);
+  }
+  if(!alive.length) return null;
+  var target = pickRandom(alive);
+
+  if(ai.role === 'seer'){
+    var wolfFound = null;
+    if(ai.seerChecks){
+      for(var i = 0; i < ai.seerChecks.length; i++){
+        if(ai.seerChecks[i].isWolf) wolfFound = ai.seerChecks[i];
+      }
+    }
+    if(wolfFound && !ai._announcedWolf){
+      ai._announcedWolf = true;
+      return '我是预言家，' + wolfFound.id + ' 号是狼人！';
+    }
+    return '我是预言家，' + target + ' 号你要么自曝要么被投。';
+  }
+  if(ai.role === 'wolf'){
+    return '我觉得 ' + target + ' 号发言很奇怪，像个狼。';
+  }
+  return pickRandom([
+    '我怀疑 ' + target + ' 号，投票跟你们走。',
+    '目前没什么头绪，继续听发言。',
+    '刚才 ' + target + ' 号的发言逻辑有点问题。'
+  ]);
+}
+
+/* ============================================================
+   客户端
    ============================================================ */
 function joinRoom(){
   var name = ($id('nameIpt') && $id('nameIpt').value.trim()) || '玩家';
@@ -426,22 +1298,16 @@ function connectAsClient(code, name){
 
   var clientId = 'wolf_c_' + myTag.slice(0, 10) + '_' + Math.random().toString(36).slice(2, 6);
   mqttClient = mqtt.connect(BROKER_URL, {
-    clientId: clientId,
-    clean: true,
-    reconnectPeriod: 2000,
-    connectTimeout: 15000,
-    keepalive: 30,
+    clientId: clientId, clean: true, reconnectPeriod: 2000,
+    connectTimeout: 15000, keepalive: 30,
     will: {
       topic: roomTopic,
       payload: JSON.stringify({ to: 'host', from: myTag, type: 'leave' }),
-      qos: 1,
-      retain: false
+      qos: 1, retain: false
     }
   });
 
-  var joined = false;
-  var retryTimer = null;
-  var tries = 0;
+  var joined = false, retryTimer = null, tries = 0;
 
   mqttClient.on('connect', function(){
     setNet(true);
@@ -451,7 +1317,6 @@ function connectAsClient(code, name){
       mqttClient.publish(roomTopic, JSON.stringify({
         to: 'host', from: myTag, type: 'join', name: name
       }), { qos: 1 });
-
       if(!retryTimer){
         retryTimer = setInterval(function(){
           if(joined){ clearInterval(retryTimer); retryTimer = null; return; }
@@ -459,8 +1324,7 @@ function connectAsClient(code, name){
           if(tries > 6){
             clearInterval(retryTimer); retryTimer = null;
             lastErr = '找不到房间 ' + code + '，请确认房主已创建';
-            G = null;
-            render();
+            G = null; render();
             return;
           }
           mqttClient.publish(roomTopic, JSON.stringify({
@@ -476,7 +1340,6 @@ function connectAsClient(code, name){
     var msg;
     try { msg = JSON.parse(payload.toString()); } catch(e){ return; }
     if(msg.to !== myTag) return;
-
     if(msg.type === 'update'){
       joined = true;
       if(retryTimer){ clearInterval(retryTimer); retryTimer = null; }
@@ -486,8 +1349,7 @@ function connectAsClient(code, name){
     } else if(msg.type === 'error'){
       joined = true;
       if(retryTimer){ clearInterval(retryTimer); retryTimer = null; }
-      lastErr = msg.msg;
-      render();
+      lastErr = msg.msg; render();
     }
   });
 
@@ -497,7 +1359,7 @@ function connectAsClient(code, name){
 }
 
 /* ============================================================
-   游戏逻辑（房主侧运行）
+   游戏逻辑
    ============================================================ */
 function buildPromptFor(player){
   if(host.phase === 'hunter' && player.id === host.hunterId){
@@ -508,7 +1370,6 @@ function buildPromptFor(player){
     return { kind: 'hunter', targets: targets };
   }
   if(!player.alive) return null;
-
   if(host.phase === 'night'){
     var step = host.nightStep;
     if(step === 0 && player.role === 'guard'){
@@ -555,19 +1416,16 @@ function buildPromptFor(player){
     }
     return null;
   }
-
   if(host.phase === 'sheriffApply'){
     if(!player.alive) return null;
     if(host.sheriffApplied && host.sheriffApplied[player.id]) return null;
     return { kind: 'sheriffApply', targets: [] };
   }
-
   if(host.phase === 'sheriffVote'){
     if(!player.alive) return null;
     if(host.sheriffVotes[player.id] != null) return null;
     return { kind: 'sheriffVote', targets: host.sheriffCandidates };
   }
-
   if(host.phase === 'vote' && player.alive){
     if(host.votes[player.id] != null) return null;
     var vts = [];
@@ -581,7 +1439,6 @@ function buildPromptFor(player){
 
 function hostHandleAction(player, msg){
   var kind = msg.kind, target = msg.target, data = msg.data;
-
   if(host.phase === 'night'){
     if(kind === 'guard' && player.role === 'guard' && host.nightStep === 0){
       host.night.guardTarget = target; advanceNight();
@@ -603,75 +1460,55 @@ function hostHandleAction(player, msg){
     }
     return;
   }
-
   if(host.phase === 'sheriffApply' && kind === 'sheriffApply'){
     if(host.sheriffApplied[player.id]) return;
     host.sheriffApplied[player.id] = true;
     var up = data && data.up;
-    var idx = host.sheriffCandidates.indexOf(player.id);
-    if(up && idx === -1) host.sheriffCandidates.push(player.id);
-
+    if(up && host.sheriffCandidates.indexOf(player.id) === -1) host.sheriffCandidates.push(player.id);
     var allApplied = true;
     for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
-      var pl = p.value;
-      if(pl.alive && !host.sheriffApplied[pl.id]){ allApplied = false; break; }
+      if(p.value.alive && !host.sheriffApplied[p.value.id]){ allApplied = false; break; }
     }
-
     if(allApplied){
-      if(host.sheriffCandidates.length === 0){
-        host.phase = 'discuss';
-      } else if(host.sheriffCandidates.length === 1){
-        host.sheriffId = host.sheriffCandidates[0];
-        host.phase = 'sheriffResult';
+      if(host.sheriffCandidates.length === 0) host.phase = 'discuss';
+      else if(host.sheriffCandidates.length === 1){
+        host.sheriffId = host.sheriffCandidates[0]; host.phase = 'sheriffResult';
       } else {
-        host.phase = 'sheriffVote';
-        host.sheriffVotes = {};
+        host.phase = 'sheriffVote'; host.sheriffVotes = {};
       }
     }
     broadcastHostState();
     return;
   }
-
   if(host.phase === 'sheriffVote' && kind === 'sheriffVote'){
     if(player.alive && host.sheriffVotes[player.id] == null){
       host.sheriffVotes[player.id] = target;
       var allVoted = true;
       for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
-        var pl = p.value;
-        if(pl.alive && host.sheriffVotes[pl.id] == null){ allVoted = false; break; }
+        if(p.value.alive && host.sheriffVotes[p.value.id] == null){ allVoted = false; break; }
       }
-      if(allVoted) applySheriffVote();
-      else broadcastHostState();
+      if(allVoted) applySheriffVote(); else broadcastHostState();
     }
     return;
   }
-
   if(host.phase === 'vote'){
     if(kind === 'vote' && player.alive && host.votes[player.id] == null){
       host.votes[player.id] = target;
       var allVoted = true;
       for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
-        var pl = p.value;
-        if(pl.alive && host.votes[pl.id] == null){ allVoted = false; break; }
+        if(p.value.alive && host.votes[p.value.id] == null){ allVoted = false; break; }
       }
-      if(allVoted) applyVote();
-      else broadcastHostState();
+      if(allVoted) applyVote(); else broadcastHostState();
     }
     return;
   }
-
   if(host.phase === 'hunter' && player.id === host.hunterId){
     if(kind === 'hunter'){
       if(target != null){ var t = host.players.get(target); if(t) t.alive = false; }
-      if(host.sheriffId && host.players.get(host.sheriffId) && !host.players.get(host.sheriffId).alive){ host.sheriffId = null; host.sheriffReelection = true; }
-      if(checkWin()){
-        host.phase = 'over';
-        host.allRoles = [];
-        for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
-          host.allRoles.push({ id:p.value.id, role:p.value.role, alive:p.value.alive });
-        }
-        broadcastHostState(); return;
+      if(host.sheriffId && host.players.get(host.sheriffId) && !host.players.get(host.sheriffId).alive){
+        host.sheriffId = null; host.sheriffReelection = true;
       }
+      if(checkWin()){ endGame(); return; }
       if(host.hunterAfter === 'night'){
         host.phase = 'night'; host.day++; host.nightStep = 0; host.night = {};
         host.deaths = []; host.hunterId = null; broadcastHostState();
@@ -681,10 +1518,23 @@ function hostHandleAction(player, msg){
 }
 
 function advanceNight(){
-  if(host.nightStep === 0 && host.night.guardTarget !== undefined) host.nightStep = 1;
-  else if(host.nightStep === 1 && host.night.wolfTarget !== undefined) host.nightStep = 2;
-  else if(host.nightStep === 2 && host.night.witchDone) host.nightStep = 3;
-  else if(host.nightStep === 3 && host.night.seerDone) host.nightStep = 4;
+  function hasRole(r){
+    for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+      if(p.value.alive && p.value.role === r) return true;
+    }
+    return false;
+  }
+  while(host.nightStep < 4){
+    if(host.nightStep === 0 && !hasRole('guard')){ host.nightStep = 1; continue; }
+    if(host.nightStep === 1 && !hasRole('wolf')) { host.nightStep = 2; continue; }
+    if(host.nightStep === 2 && !hasRole('witch')){ host.nightStep = 3; continue; }
+    if(host.nightStep === 3 && !hasRole('seer')) { host.nightStep = 4; continue; }
+    if(host.nightStep === 0 && host.night.guardTarget !== undefined){ host.nightStep = 1; continue; }
+    if(host.nightStep === 1 && host.night.wolfTarget !== undefined){ host.nightStep = 2; continue; }
+    if(host.nightStep === 2 && host.night.witchDone){ host.nightStep = 3; continue; }
+    if(host.nightStep === 3 && host.night.seerDone){ host.nightStep = 4; continue; }
+    break;
+  }
   if(host.nightStep >= 4) resolveNight();
   else broadcastHostState();
 }
@@ -703,7 +1553,6 @@ function resolveNight(){
   deaths.forEach(function(d){ var p = host.players.get(d.id); if(p) p.alive = false; });
   host.lastGuard = host.night.guardTarget;
   host.deaths = deaths;
-
   var poisoned = {};
   deaths.forEach(function(d){ if(d.cause === 'poison') poisoned[d.id] = true });
   var hunter = null;
@@ -713,20 +1562,14 @@ function resolveNight(){
   });
   host.hunterId = hunter;
   host.hunterAfter = 'discuss';
-
   if(host.sheriffId && host.players.get(host.sheriffId) && !host.players.get(host.sheriffId).alive){
     host.sheriffId = null; host.sheriffReelection = true;
   }
-
   if(host.day === 1 || host.sheriffReelection){
     host.phase = 'sheriffApply';
-    host.sheriffCandidates = [];
-    host.sheriffVotes = {};
-    host.sheriffApplied = {};
+    host.sheriffCandidates = []; host.sheriffVotes = {}; host.sheriffApplied = {};
     host.sheriffReelection = false;
-  } else {
-    host.phase = 'dawn';
-  }
+  } else { host.phase = 'dawn'; }
   broadcastHostState();
 }
 
@@ -740,6 +1583,15 @@ function checkWin(){
   if(wolves === 0){ host.winner = 'good'; return true; }
   if(wolves >= good){ host.winner = 'wolf'; return true; }
   host.winner = null; return false;
+}
+
+function endGame(){
+  host.phase = 'over';
+  host.allRoles = [];
+  for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
+    host.allRoles.push({ id:p.value.id, role:p.value.role, alive:p.value.alive });
+  }
+  broadcastHostState();
 }
 
 function applySheriffVote(){
@@ -787,13 +1639,18 @@ function hostStartGame(){
   ids.forEach(function(id, i){
     var p = host.players.get(id);
     p.role = roles[i]; p.alive = true; p.seerChecks = [];
+    p._announcedWolf = false;
   });
   host.phase = 'night'; host.day = 1; host.nightStep = 0; host.night = {};
   host.lastGuard = null; host.witchHealUsed = false; host.witchPoisonUsed = false;
   host.deaths = []; host.hunterId = null; host.hunterAfter = null;
   host.votes = {}; host.voteResult = null; host.winner = null; host.allRoles = null;
   host.sheriffId = null; host.sheriffCandidates = []; host.sheriffVotes = {}; host.sheriffReelection = false; host.sheriffApplied = {};
-  broadcastHostState(); return true;
+  host.chatLog = [];
+  aiLastSpeak = 0;
+  broadcastHostState();
+  setTimeout(function(){ advanceNight(); }, 200);
+  return true;
 }
 
 function hostContinue(){
@@ -802,9 +1659,7 @@ function hostContinue(){
     host.phase = 'discuss'; broadcastHostState(); return;
   }
   if(host.phase === 'sheriffApply'){
-    if(host.sheriffCandidates.length === 0){
-      host.phase = 'discuss'; broadcastHostState(); return;
-    }
+    if(host.sheriffCandidates.length === 0){ host.phase = 'discuss'; broadcastHostState(); return; }
     host.phase = 'sheriffVote'; host.sheriffVotes = {};
     broadcastHostState(); return;
   }
@@ -824,21 +1679,16 @@ function hostContinue(){
       if(p){ p.alive = false; votedOut = p; }
     }
     if(votedOut && votedOut.id === host.sheriffId){ host.sheriffId = null; host.sheriffReelection = true; }
-    if(checkWin()){
-      host.phase = 'over';
-      host.allRoles = [];
-      for(var it = host.players.values(), pp = it.next(); !pp.done; pp = it.next()){
-        host.allRoles.push({ id:pp.value.id, role:pp.value.role, alive:pp.value.alive });
-      }
-      broadcastHostState(); return;
-    }
+    if(checkWin()){ endGame(); return; }
     if(votedOut && votedOut.role === 'hunter'){
       host.hunterId = votedOut.id; host.hunterAfter = 'night'; host.phase = 'hunter';
       broadcastHostState(); return;
     }
     host.phase = 'night'; host.day++; host.nightStep = 0; host.night = {};
     host.deaths = []; host.voteResult = null; host.hunterId = null;
-    broadcastHostState(); return;
+    broadcastHostState();
+    setTimeout(function(){ advanceNight(); }, 200);
+    return;
   }
   if(host.phase === 'over') restartHost();
 }
@@ -849,15 +1699,15 @@ function restartHost(){
   host.deaths = []; host.hunterId = null; host.hunterAfter = null;
   host.votes = {}; host.voteResult = null; host.winner = null; host.allRoles = null;
   host.sheriffId = null; host.sheriffCandidates = []; host.sheriffVotes = {}; host.sheriffReelection = false; host.sheriffApplied = {};
+  host.chatLog = [];
+  aiLastSpeak = 0;
   for(var it = host.players.values(), p = it.next(); !p.done; p = it.next()){
     p.value.role = null; p.value.alive = true; p.value.seerChecks = [];
+    p.value._announcedWolf = false;
   }
   broadcastHostState();
 }
 
-/* ============================================================
-   玩家动作分发
-   ============================================================ */
 function sendAction(kind, target, data){
   if(isHost){
     var me = host.players.get(1);
@@ -883,34 +1733,119 @@ function confirmWitch(canHeal, canPoison){
   if(canPoison && witchSel.poison === undefined) return;
   act('witch', null, { heal: canHeal ? !!witchSel.heal : false, poison: canPoison ? witchSel.poison : null });
 }
+function doChatSend(){
+  var ipt = $id('chatIpt');
+  if(!ipt) return;
+  var text = ipt.value.trim();
+  if(!text) return;
+  playerSendChat(text);
+  ipt.value = '';
+}
+
+/* ============================================================
+   AI 设置
+   ============================================================ */
+function toggleAI(){
+  AI_CONFIG.enabled = !AI_CONFIG.enabled;
+  saveAIConfig();
+  render();
+}
+function setAIKey(){
+  var ipt = $id('aiKeyIpt');
+  if(!ipt) return;
+  AI_CONFIG.apiKey = ipt.value.trim();
+  if(AI_CONFIG.apiKey) AI_CONFIG.enabled = true;
+  saveAIConfig();
+  render();
+}
+function setAIProvider(){
+  var sel = $id('aiProviderSel');
+  if(!sel) return;
+  AI_CONFIG.provider = sel.value;
+  AI_CONFIG.model = AI_PRESETS[AI_CONFIG.provider].model;
+  saveAIConfig();
+  render();
+}
+function setAIProxy(){
+  var ipt = $id('aiProxyIpt');
+  if(!ipt) return;
+  AI_CONFIG.proxyUrl = ipt.value.trim();
+  saveAIConfig();
+  render();
+}
+async function testAIConnection(){
+  AI_DEBUG.lastStatus = 'testing';
+  AI_DEBUG.lastMessage = '正在测试…';
+  render();
+
+  if(!AI_CONFIG.enabled){
+    AI_DEBUG.lastStatus = 'error';
+    AI_DEBUG.lastMessage = '❌ AI 未启用';
+    render(); return;
+  }
+  if(!canUseLLM()){
+    AI_DEBUG.lastStatus = 'error';
+    AI_DEBUG.lastMessage = '❌ 配置不完整';
+    render(); return;
+  }
+
+  queueLLM(async function(){
+    var result = await callLLM('你是助手。', '只回复两个字：成功', 10);
+    if(result){
+      AI_DEBUG.lastStatus = 'ok';
+      AI_DEBUG.lastMessage = '✅ 成功！AI 回复："' + result.slice(0, 40) + '"，耗时 ' + AI_DEBUG.lastDuration + 'ms';
+    } else if(AI_DEBUG.lastStatus !== 'error'){
+      AI_DEBUG.lastStatus = 'error';
+      AI_DEBUG.lastMessage = '❌ 测试失败';
+    }
+    render();
+  });
+}
+
+/* ============================================================
+   定时器
+   ============================================================ */
+setInterval(function(){
+  if(isHost && host) processAIActions();
+}, 2000);
 
 /* ============================================================
    渲染
    ============================================================ */
 function render(){
   var app = $id('app');
-  if(!G){ app.innerHTML = viewEntry(); return; }
-  var ph = G.phase, html;
-  if(ph === 'lobby')       html = viewLobby();
-  else if(ph === 'night')  html = viewNight();
-  else if(ph === 'dawn')   html = viewDawn();
-  else if(ph === 'sheriffApply') html = viewSheriffApply();
-  else if(ph === 'sheriffVote') html = viewSheriffVote();
-  else if(ph === 'sheriffResult') html = viewSheriffResult();
-  else if(ph === 'hunter') html = viewHunter();
-  else if(ph === 'discuss')html = viewDiscuss();
-  else if(ph === 'vote')   html = viewVote();
-  else if(ph === 'voteResult') html = viewVoteResult();
-  else if(ph === 'over')   html = viewOver();
-  else html = '<div class="center-screen"><div class="spinner"></div></div>';
-  app.innerHTML = html;
+  var saveIpt = '';
+  var oldIpt = $id('chatIpt');
+  if(oldIpt) saveIpt = oldIpt.value;
+
+  if(!G){ app.innerHTML = viewEntry(); }
+  else {
+    var ph = G.phase, html;
+    if(ph === 'lobby')       html = viewLobby();
+    else if(ph === 'night')  html = viewNight();
+    else if(ph === 'dawn')   html = viewDawn();
+    else if(ph === 'sheriffApply') html = viewSheriffApply();
+    else if(ph === 'sheriffVote') html = viewSheriffVote();
+    else if(ph === 'sheriffResult') html = viewSheriffResult();
+    else if(ph === 'hunter') html = viewHunter();
+    else if(ph === 'discuss')html = viewDiscuss();
+    else if(ph === 'vote')   html = viewVote();
+    else if(ph === 'voteResult') html = viewVoteResult();
+    else if(ph === 'over')   html = viewOver();
+    else html = '<div class="center-screen"><div class="spinner"></div></div>';
+    app.innerHTML = html;
+  }
+  if(saveIpt){
+    var ni = $id('chatIpt');
+    if(ni) ni.value = saveIpt;
+  }
 }
 
 function viewEntry(){
   var savedName = localStorage.getItem('wolf_name') || '';
   var err = lastErr ? '<div class="err">' + esc(lastErr) + '</div>' : '';
   return '<div class="title">狼 人 杀</div>' +
-    '<div class="subtitle">手机联机 · MQTT 稳定版</div>' +
+    '<div class="subtitle">手机联机 · AI 对战</div>' +
     '<div class="card"><div class="label">你的昵称</div>' +
     '<input class="ipt" id="nameIpt" maxlength="8" placeholder="输入昵称" value="' + esc(savedName) + '"></div>' +
     '<button class="primary big" onclick="createRoom()">创 建 房 间</button>' +
@@ -919,36 +1854,88 @@ function viewEntry(){
     '<input class="ipt" id="codeIpt" maxlength="4" inputmode="numeric" pattern="[0-9]*" placeholder="4 位数字"></div>' +
     '<button class="ghost" onclick="joinRoom()">加 入 房 间</button>' + err +
     '<p class="muted" style="margin-top:26px;font-size:12.5px;line-height:1.9">' +
-    '· 房主创建后，把 4 位房间号告诉朋友<br>' +
-    '· 朋友在同一页面输入房间号加入<br>' +
-    '· 至少 6 人（最多 12 人）才能开始游戏<br>' +
-    '· 消息走公共 MQTT 服务器，跨网络稳定性更好</p>';
+    '· 房主可添加 AI 一起玩<br>' +
+    '· 默认 Puter.js（免费免 Key）<br>' +
+    '· 讨论阶段可打字聊天</p>' +
+    viewAISettingsCard();
+}
+
+function viewAISettingsCard(){
+  var preset = AI_PRESETS[AI_CONFIG.provider];
+  var dot = (AI_CONFIG.enabled && canUseLLM()) ? 'on' : 'off';
+  var statusText = (AI_CONFIG.enabled && canUseLLM()) ? ('已启用 · ' + preset.name) : '未启用（模板发言）';
+
+  var dbgColor = '#8a8aa0';
+  if(AI_DEBUG.lastStatus === 'ok') dbgColor = '#6cc98c';
+  else if(AI_DEBUG.lastStatus === 'error') dbgColor = '#e06c6c';
+  else if(AI_DEBUG.lastStatus === 'testing') dbgColor = '#d4af37';
+  var dbgLine = '<p style="font-size:11.5px;color:' + dbgColor + ';margin:6px 0;line-height:1.6;word-break:break-all">' +
+    '📡 ' + esc(AI_DEBUG.lastMessage) + '<br>' +
+    '成功 ' + AI_DEBUG.okCount + ' 次 / 失败 ' + AI_DEBUG.errCount + ' 次' +
+    '</p>';
+
+  var providerOpts = '';
+  for(var k in AI_PRESETS){
+    providerOpts += '<option value="' + k + '"' + (AI_CONFIG.provider === k ? ' selected' : '') + '>' +
+      AI_PRESETS[k].name + '</option>';
+  }
+
+  var keyBlock = '';
+  if(preset.needKey){
+    keyBlock = '<input class="ipt" id="aiKeyIpt" type="text" placeholder="粘贴 API Key" value="' + esc(AI_CONFIG.apiKey) + '" style="font-size:12px;letter-spacing:0;margin-bottom:8px" onblur="setAIKey()">';
+  }
+
+  var proxyBlock = '';
+  if(preset.needProxy){
+    proxyBlock = '<input class="ipt" id="aiProxyIpt" type="text" placeholder="代理地址" ' +
+      'value="' + esc(AI_CONFIG.proxyUrl) + '" style="font-size:12px;letter-spacing:0;margin-bottom:8px" onblur="setAIProxy()">';
+  }
+
+  return '<div class="aikey-box">' +
+    '<div class="status"><span><span class="dot ' + dot + '"></span>' + statusText + '</span>' +
+    '<button class="ghost" style="width:auto;padding:6px 12px;font-size:12px" onclick="toggleAI()">' + (AI_CONFIG.enabled ? '禁用' : '启用') + '</button></div>' +
+    '<select class="ipt" id="aiProviderSel" style="font-size:13px;letter-spacing:0;margin-bottom:8px" onchange="setAIProvider()">' + providerOpts + '</select>' +
+    keyBlock +
+    proxyBlock +
+    '<button class="primary" style="padding:11px;font-size:14px" onclick="setAIKey()">保存设置</button>' +
+    '<button class="ghost" style="padding:11px;font-size:14px;margin-top:8px" onclick="testAIConnection()">🧪 测试连接</button>' +
+    dbgLine +
+    '<p style="font-size:11.5px;color:#6a6a84;margin:6px 0 0;line-height:1.7">' + esc(preset.hint) + '</p>' +
+    '</div>';
 }
 
 function viewLobby(){
   var me = G.you, n = G.players.length;
+  var hasAI = false;
+  for(var i = 0; i < G.players.length; i++) if(G.players[i].isAI) hasAI = true;
   var canStart = me.isHost && n >= 6 && n <= 12;
   var rows = G.players.map(function(p, i){
     var meTag = p.id === me.id ? ' <span style="color:#8a8aa0;font-size:12px">(你)</span>' : '';
     var hostTag = p.id === G.hostId ? '<span class="ptag host">房主</span>' : '';
-    var sheriffTag = p.isSheriff ? '<span class="sheriff-tag">🏅 警长</span>' : '';
-    return '<div class="prow ' + (p.id === me.id ? 'me' : '') + '">' +
-      '<div class="avatar">' + (i + 1) + '</div>' +
-      '<div class="pname">' + esc(p.name) + meTag + sheriffTag + '</div>' + hostTag + '</div>';
+    var aiTag = p.isAI ? '<span class="ptag ai">AI</span>' : '';
+    return '<div class="prow ' + (p.id === me.id ? 'me' : '') + (p.isAI ? ' ai' : '') + '">' +
+      '<div class="avatar">' + (p.isAI ? '🤖' : (i + 1)) + '</div>' +
+      '<div class="pname">' + esc(p.name) + meTag + '</div>' + aiTag + hostTag + '</div>';
   }).join('');
   var tip = '';
-  if(n < 6) tip = '<p class="muted">还需要 ' + (6 - n) + ' 人才能开始</p>';
+  if(n < 6) tip = '<p class="muted">还需要 ' + (6 - n) + ' 人（可加 AI）</p>';
   else if(n > 12) tip = '<p class="muted">人数过多，最多 12 人</p>';
+  var aiRow = me.isHost
+    ? '<div class="aibtn-row">' +
+      '<button class="ghost" onclick="hostAddAI()" ' + (n >= 12 ? 'disabled' : '') + '>➕ 添加 AI</button>' +
+      '<button class="ghost" onclick="hostRemoveAI()" ' + (hasAI ? '' : 'disabled') + '>➖ 移除 AI</button>' +
+      '</div>'
+    : '';
   var btn = me.isHost
     ? '<button class="primary big" onclick="doStart()" ' + (canStart ? '' : 'disabled') + '>开 始 游 戏</button>'
     : '<p class="muted" style="text-align:center;margin-top:20px">等待房主开始游戏…</p>';
   var shareBlock = me.isHost
     ? '<div class="roomcode">房间号<b>' + G.code + '</b></div>' +
-      '<p class="muted" style="text-align:center">把房间号告诉朋友，让他们在首页输入加入</p>'
+      '<p class="muted" style="text-align:center">把房间号告诉朋友，或加 AI 陪你玩</p>'
     : '';
   return '<div class="panel">' + shareBlock +
     '<div class="label" style="margin-top:8px">玩家列表 (' + n + '/12)</div>' +
-    '<div class="plist">' + rows + '</div>' + tip + btn + '</div>';
+    '<div class="plist">' + rows + '</div>' + aiRow + tip + btn + '</div>';
 }
 
 function topBadge(){
@@ -1066,7 +2053,6 @@ function viewSheriffApply(){
   var myChoice = G.sheriffApplied && G.sheriffApplied[me.id];
   var isUp = (G.sheriffCandidates || []).indexOf(me.id) !== -1;
   var list = (G.sheriffCandidates || []).map(function(id){ return id + '号'; }).join('、') || '暂无';
-
   if(myChoice){
     return '<div class="center-screen">' + topBadge() +
       '<div style="font-size:56px">🏅</div>' +
@@ -1074,7 +2060,6 @@ function viewSheriffApply(){
       '<p class="muted">当前上警名单：' + list + '</p>' +
       '<p class="muted">等待其他玩家表态…</p></div>';
   }
-
   return '<div class="panel center">' + topBadge() +
     '<div class="phasehead">🏅 警长竞选</div>' +
     '<div class="bigmsg">第 ' + G.day + ' 天 · 上警环节</div>' +
@@ -1083,7 +2068,6 @@ function viewSheriffApply(){
     '<div style="height:10px"></div>' +
     '<button class="primary big" onclick="act(\'sheriffApply\', null, {up:true})">上 警 竞 选</button>' +
     '<button class="ghost" style="margin-top:10px" onclick="act(\'sheriffApply\', null, {up:false})">不 上 警</button>' +
-    '<p class="muted" style="font-size:12px;margin-top:16px">* 所有人表态后自动进入下一步</p>' +
     '</div>';
 }
 
@@ -1111,8 +2095,7 @@ function viewSheriffResult(){
     '<div class="phasehead">🏅 警长竞选结果</div>' +
     '<div class="bigmsg" style="margin:20px 0;font-size:22px;">' + sheriffName + '</div>' +
     (G.sheriffId ? '<p class="muted">当选警长，投票时拥有 2 票权</p>' : '<p class="muted">平票，警徽流失</p>') +
-    (me.isHost ? '<button class="primary big" onclick="doContinue()">继 续</button>' : '<p class="muted">等待房主继续…</p>') +
-    '</div>';
+    (me.isHost ? '<button class="primary big" onclick="doContinue()">继 续</button>' : '<p class="muted">等待房主继续…</p>') + '</div>';
 }
 
 function viewDawn(){
@@ -1146,6 +2129,27 @@ function viewHunter(){
     '<button class="ghost" onclick="act(\'hunter\',null)">放弃开枪</button></div>';
 }
 
+function viewChatBox(){
+  var chat = G.chatLog || [];
+  var meId = G.you.id;
+  var items = chat.map(function(c){
+    var nameCls = c.isAI ? 'ai-name' : '';
+    var meCls = (c.id === meId) ? 'me' : '';
+    var tag = '';
+    if(c.isAI){
+      tag = c.fromModel ? '<span style="color:#6cc98c;font-size:10px">[AI]</span>' :
+                          '<span style="color:#8a8aa0;font-size:10px">[模板]</span>';
+    }
+    return '<div class="chatmsg ' + meCls + '">' + tag + '<b class="' + nameCls + '">' + esc(c.name) + ':</b> ' + esc(c.text) + '</div>';
+  }).join('');
+  if(!items) items = '<div class="muted" style="font-size:12.5px">暂无发言…</div>';
+  return '<div class="chatbox">' + items + '</div>' +
+    '<div class="chatinput">' +
+    '<input id="chatIpt" maxlength="60" placeholder="说点什么…" onkeydown="if(event.key===\'Enter\')doChatSend()">' +
+    '<button class="primary" onclick="doChatSend()">发送</button>' +
+    '</div>';
+}
+
 function viewDiscuss(){
   var me = G.you;
   var alive = G.players.filter(function(p){ return p.alive });
@@ -1156,8 +2160,8 @@ function viewDiscuss(){
     : '<p class="muted" style="text-align:center;margin-top:16px">等待房主发起投票…</p>';
   return '<div class="panel">' + topBadge() +
     '<div class="phasehead">☀️ 第 ' + G.day + ' 天 · 讨论</div>' +
-    '<div class="bigmsg">存活：' + alive.map(function(p){ return p.id + '号' }).join('、') + '</div>' + deadLine +
-    '<p class="muted">请自由发言，找出隐藏的狼人</p>' + btn + '</div>';
+    '<div class="bigmsg">存活：' + alive.map(function(p){ return p.id + '号' + (p.isAI ? '(AI)' : '') }).join('、') + '</div>' + deadLine +
+    viewChatBox() + btn + '</div>';
 }
 
 function viewVote(){
@@ -1213,9 +2217,6 @@ function viewOver(){
     '<div class="playerlist">' + rows + '</div>' + btn + '</div>';
 }
 
-/* ============================================================
-   启动
-   ============================================================ */
 render();
 setNet(false);
 </script>
